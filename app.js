@@ -25,6 +25,7 @@ const DEF_RECT = { link: { fw: 0.15, fh: 0.30 }, folder: { fw: 0.15, fh: 0.30 },
 const MIN_PX = { link: [96, 104], folder: [96, 110], note: [170, 120], checklist: [180, 150], weather: [160, 120], currency: [150, 110], crypto: [160, 110], quote: [200, 100] };
 const VROWS = 8; // виртуальных строк для пересчёта старой сетки в свободные координаты
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const SNAP = 12; // шаг магнита сетки в px: тянешь — углы сами ровняются
 function fracOverlap(a, b) {
   return a.fx < b.fx + b.fw && a.fx + a.fw > b.fx && a.fy < b.fy + b.fh && a.fy + a.fh > b.fy;
 }
@@ -976,8 +977,8 @@ function initFreeDrag(el, w) {
       el.classList.add('dragging');
       el.style.pointerEvents = 'none'; // чтобы elementFromPoint видел папку под виджетом
       const ew = el.offsetWidth, eh = el.offsetHeight;
-      const nx = clamp(ox + dx, 0, Math.max(0, zr.width - ew));
-      const ny = clamp(oy + dy, 0, Math.max(0, zr.height - eh));
+      const nx = clamp(Math.round((ox + dx) / SNAP) * SNAP, 0, Math.max(0, zr.width - ew));
+      const ny = clamp(Math.round((oy + dy) / SNAP) * SNAP, 0, Math.max(0, zr.height - eh));
       // запрет налезания друг на друга: целиком, иначе скользим вдоль стороны
       const cur = { x: el.offsetLeft, y: el.offsetTop, w: ew, h: eh };
       if (!hitsAny({ ...cur, x: nx, y: ny }, w.id)) { cur.x = nx; cur.y = ny; }
@@ -1026,8 +1027,8 @@ function initResize(handle, el, w) {
     const mm = MIN_PX[w.type] || [90, 90];
     try { handle.setPointerCapture(e.pointerId); } catch {}
     const move = (ev) => {
-      const nw = clamp(sw + ev.clientX - startX, mm[0], Math.max(mm[0], zr.width - el.offsetLeft));
-      const nh = clamp(sh + ev.clientY - startY, mm[1], Math.max(mm[1], zr.height - el.offsetTop));
+      const nw = clamp(Math.round((sw + ev.clientX - startX) / SNAP) * SNAP, mm[0], Math.max(mm[0], zr.width - el.offsetLeft));
+      const nh = clamp(Math.round((sh + ev.clientY - startY) / SNAP) * SNAP, mm[1], Math.max(mm[1], zr.height - el.offsetTop));
       // размер, не налезающий на соседей
       if (hitsAny({ x: el.offsetLeft, y: el.offsetTop, w: nw, h: nh }, w.id)) return;
       el.style.width = nw + 'px';

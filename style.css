@@ -175,7 +175,7 @@ body.boot .widget{animation:wpop .35s backwards}
 /* в обычном режиме рамок нет, в ✎ — еле видимые рамки + чуть заметная сетка зоны */
 body.editing .widget{border-color:rgba(255,255,255,.35)}
 body.editing .w-icon{border-color:rgba(255,255,255,.35)}
-body.editing .board{background-image:linear-gradient(rgba(255,255,255,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.07) 1px,transparent 1px);background-size:44px 44px;border-radius:18px}
+body.editing .board{background-image:linear-gradient(rgba(255,255,255,.09) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.09) 1px,transparent 1px),linear-gradient(rgba(255,255,255,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.05) 1px,transparent 1px);background-size:48px 48px,48px 48px,12px 12px,12px 12px;border-radius:18px}
 /* чек-лист */
 .w-check-list{flex:1;min-height:0;width:100%;overflow-y:auto;display:flex;flex-direction:column;gap:2px;touch-action:pan-y}
 .w-check-item{display:flex;align-items:center;gap:8px;font-size:13px;padding:5px 6px;border-radius:8px;cursor:pointer}
