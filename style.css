@@ -198,6 +198,23 @@ html:not([data-theme="light"]) .w-shuffle img,
 html:not([data-theme="light"]) .drawer-head button img,
 html:not([data-theme="light"]) .w-check-item .del img{filter:invert(.92)}
 body.editing #editToggle img{filter:none}
+/* чекбоксы и стрелки в стиле приложения */
+.card-modal .check input[type=checkbox],.drawer-body .check input[type=checkbox]{appearance:none;-webkit-appearance:none;width:20px;height:20px;flex:none;margin:0;cursor:pointer;border-radius:7px;border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.1);position:relative;padding:0}
+.card-modal .check input[type=checkbox]:checked,.drawer-body .check input[type=checkbox]:checked{background:#fff;border-color:#fff}
+.card-modal .check input[type=checkbox]:checked::after,.drawer-body .check input[type=checkbox]:checked::after{content:'';position:absolute;left:6px;top:2px;width:5px;height:10px;border:solid #111;border-width:0 2.5px 2.5px 0;transform:rotate(45deg)}
+[data-theme="light"] .card-modal .check input[type=checkbox],[data-theme="light"] .drawer-body .check input[type=checkbox]{border-color:rgba(0,0,0,.3);background:rgba(0,0,0,.06)}
+[data-theme="light"] .card-modal .check input[type=checkbox]:checked,[data-theme="light"] .drawer-body .check input[type=checkbox]:checked{background:#111;border-color:#111}
+[data-theme="light"] .card-modal .check input[type=checkbox]:checked::after,[data-theme="light"] .drawer-body .check input[type=checkbox]:checked::after{border-color:#fff}
+.card-modal input[type=number]::-webkit-outer-spin-button,.card-modal input[type=number]::-webkit-inner-spin-button,.drawer-body input[type=number]::-webkit-outer-spin-button,.drawer-body input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.card-modal input[type=number],.drawer-body input[type=number]{-moz-appearance:textfield;appearance:textfield}
+.num-step{display:flex;gap:6px;align-items:stretch}
+.num-step input{flex:1;min-width:0}
+.num-step button{flex:none;width:38px;border-radius:10px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.1);color:var(--text);font-size:17px;cursor:pointer;line-height:1}
+.num-step button:hover{background:rgba(255,255,255,.22)}
+.num-step button:active{transform:scale(.93)}
+[data-theme="light"] .num-step button{background:rgba(0,0,0,.05);border-color:rgba(0,0,0,.14);color:#111}
+.card-modal select,.drawer-body select{appearance:none;-webkit-appearance:none;padding-right:32px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23ffffff' stroke-opacity='.8' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center}
+[data-theme="light"] .card-modal select,[data-theme="light"] .drawer-body select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23111111' stroke-opacity='.7' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")}
 .w-check-add{display:flex;gap:6px;width:100%;margin-top:6px}
 .w-check-add input{flex:1;min-width:0;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.16);border-radius:9px;color:var(--text);padding:7px 9px;font:inherit;font-size:13px;outline:none}
 .w-check-add input::placeholder{color:var(--muted)}

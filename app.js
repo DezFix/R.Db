@@ -1641,6 +1641,42 @@ document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#ctx'))
 document.addEventListener('scroll', closeCtx, true);
 window.addEventListener('blur', closeCtx);
 
+// кастомные степперы −/+ для number-инпутов вместо нативных стрелок
+function enhanceNumbers() {
+  document.querySelectorAll('.card-modal input[type="number"], .drawer-body input[type="number"]').forEach((inp) => {
+    if (inp.closest('.num-step')) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'num-step';
+    const minus = document.createElement('button');
+    minus.type = 'button';
+    minus.textContent = '−';
+    minus.title = '−';
+    const plus = document.createElement('button');
+    plus.type = 'button';
+    plus.textContent = '+';
+    plus.title = '+';
+    inp.before(wrap);
+    wrap.append(minus, inp, plus);
+    const step = (d) => {
+      if (d > 0) inp.stepUp();
+      else inp.stepDown();
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      inp.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    const hold = (btn, d) => {
+      let t1 = null, t2 = null;
+      const stop = () => { clearTimeout(t1); clearInterval(t2); t1 = t2 = null; };
+      btn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        step(d);
+        t1 = setTimeout(() => { t2 = setInterval(() => step(d), 70); }, 450);
+      });
+      ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => btn.addEventListener(ev, stop));
+    };
+    hold(minus, -1);
+    hold(plus, 1);
+  });
+}
 // ---------- события ----------
 $('#addBtn').onclick = () => openWModal('create');
 
@@ -1824,4 +1860,5 @@ $('#folderGrid').addEventListener('contextmenu', (e) => {
     { label: t('mAddWidget'), fn: () => openWModal('create', null, null, true) },
   ]);
 });
+enhanceNumbers();
 store.load().then((s) => { state = s; scheduleBg(); showBg(); render(); setTimeout(() => document.body.classList.remove('boot'), 1000); });
