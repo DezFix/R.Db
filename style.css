@@ -217,9 +217,11 @@ body.editing #editToggle img{filter:none}
 [data-theme="light"] .card-modal select,[data-theme="light"] .drawer-body select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23111111' stroke-opacity='.7' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")}
 /* список валют с кастомными чекбоксами */
 .check-list{max-height:158px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:10px;padding:6px;touch-action:pan-y}
-.curr-opt{border-radius:8px;padding:7px 10px;cursor:pointer}
+.curr-opt{display:flex;align-items:center;border-radius:8px;padding:9px 12px;cursor:pointer;gap:12px !important}
 .curr-opt:hover{background:rgba(255,255,255,.08)}
-.curr-opt b{width:26px;flex:none;font-weight:600}
+.curr-opt b{width:30px;flex:none;font-weight:600;font-size:15px;text-align:center}
+.curr-opt .cc{font-weight:600}
+.curr-opt .cn{opacity:.6;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 [data-theme="light"] .check-list{background:rgba(0,0,0,.04);border-color:rgba(0,0,0,.1)}
 [data-theme="light"] .curr-opt:hover{background:rgba(0,0,0,.06)}
 .w-check-add{display:flex;gap:6px;width:100%;margin-top:6px}

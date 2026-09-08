@@ -671,14 +671,29 @@ function paintSyms(selected) {
     const sym = document.createElement('b');
     sym.textContent = CUR_SYM[c] || '';
     const code = document.createElement('span');
+    code.className = 'cc';
     code.textContent = c;
-    row.append(cb, sym, code);
+    const nm = document.createElement('span');
+    nm.className = 'cn';
+    nm.textContent = (CUR_NAMES[lang()] || {})[c] || '';
+    row.append(cb, sym, code, nm);
     row.onclick = (e) => { if (e.target !== cb) cb.checked = !cb.checked; };
     box.appendChild(row);
   });
 }
 function getSyms() {
   return [...document.querySelectorAll('#wSymsBox input:checked')].map((i) => i.value).slice(0, 6);
+}
+function paintBase(selected) {
+  const sel = $('#wBase');
+  sel.innerHTML = '';
+  CURRENCIES.forEach((c) => {
+    const o = document.createElement('option');
+    o.value = c;
+    o.textContent = `${c} — ${(CUR_NAMES[lang()] || {})[c] || ''}`;
+    if (c === selected) o.selected = true;
+    sel.appendChild(o);
+  });
 }
 function widgetMini(onEdit, onDel) {
   const mini = document.createElement('div');
@@ -1300,6 +1315,10 @@ function paintQuote(w, qEl, aEl) {
 const fxMem = {};
 const CUR_SYM = { USD: '$', EUR: '€', UAH: '₴', GBP: '£', PLN: 'zł', JPY: '¥', CNY: '¥', CHF: 'Fr', CZK: 'Kč', SEK: 'kr', CAD: '$', AUD: '$' };
 const CURRENCIES = ['USD', 'EUR', 'UAH', 'GBP', 'PLN', 'CHF', 'JPY', 'CNY', 'CZK', 'SEK', 'CAD', 'AUD'];
+const CUR_NAMES = {
+  ru: { USD: 'Доллар', EUR: 'Евро', UAH: 'Гривна', GBP: 'Фунт', PLN: 'Злотый', CHF: 'Франк', JPY: 'Иена', CNY: 'Юань', CZK: 'Крона', SEK: 'Крона', CAD: 'Доллар', AUD: 'Доллар' },
+  en: { USD: 'Dollar', EUR: 'Euro', UAH: 'Hryvnia', GBP: 'Pound', PLN: 'Zloty', CHF: 'Franc', JPY: 'Yen', CNY: 'Yuan', CZK: 'Koruna', SEK: 'Krona', CAD: 'Dollar', AUD: 'Dollar' },
+};
 const crMem = { t: 0, key: '', data: null };
 const COIN_IDS = { BTC: 'bitcoin', ETH: 'ethereum', SOL: 'solana', DOGE: 'dogecoin', XRP: 'ripple', ADA: 'cardano', TON: 'the-open-network', BNB: 'binancecoin', LTC: 'litecoin', TRX: 'tron', AVAX: 'avalanche-2', LINK: 'chainlink', DOT: 'polkadot', USDT: 'tether' };
 function parseCoins(s) {
@@ -1529,7 +1548,7 @@ function openWModal(mode, widget = null, preset = null, showAll = false) {
   $('#wCur').checked = widget?.showCurrent !== false;
   $('#wDays').value = widget?.days ?? 3;
   $('#wHours').value = widget?.hours ?? 0;
-  $('#wBase').value = widget?.base || 'UAH';
+  paintBase(widget?.base || 'UAH');
   paintSyms(widget?.symbols || ['USD', 'EUR']);
   $('#wCoins').value = (widget?.coins || ['BTC', 'ETH']).join(', ');
   $('#wFont').value = widget?.font || 'm';
