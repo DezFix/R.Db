@@ -440,6 +440,9 @@ const ICON_ALIASES = {
   reddit: 'reddit', spotify: 'spotify', netflix: 'netflix', twitch: 'twitch',
   steam: 'steam', notion: 'notion', google: 'google', stackoverflow: 'stackoverflow',
 };
+const ICON_CUSTOM = {
+  'community-scripts.github.io': 'https://cdn.jsdelivr.net/gh/loganmarchione/homelab-svg-assets/assets/proxmox.svg',
+};
 function iconCandidates(title, url) {
   const out = [];
   const seen = new Set();
@@ -461,6 +464,10 @@ function iconCandidates(title, url) {
     isLocal = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[::1\]|\[fe80)/i.test(host) || !host.includes('.') || /^[0-9a-fA-F:.]+$/.test(host);
     host.split('.').forEach((p) => { if (p && p !== 'www') push(norm(p)); });
   } catch {}
+  try {
+    const h = new URL(url).hostname.toLowerCase();
+    if (ICON_CUSTOM[h]) out.push(ICON_CUSTOM[h]);
+  } catch {}
   // картинка напрямую с сайта — единственный способ для IP и локалок
   if (origin) out.push(origin + '/favicon.ico');
   if (host && !isLocal) out.push(`https://icons.duckduckgo.com/ip3/${host}.ico`);
@@ -475,9 +482,18 @@ function appendIconImg(box, link, cls) {
   img.loading = 'lazy';
   img.alt = '';
   img.draggable = false;
+  img.referrerPolicy = 'no-referrer';
   if (cls) img.className = cls;
-  let i = 0;
-  img.onerror = () => { i++; if (i < urls.length) img.src = urls[i]; else img.remove(); };
+  let i = 0, retries = 0;
+  img.onerror = () => {
+    i++;
+    if (i < urls.length) { img.src = urls[i]; return; }
+    // всё мимо: возможно временный затык (rate-limit) — ещё две попытки с паузой
+    if (retries < 2 && box.isConnected) {
+      retries++;
+      setTimeout(() => { i = 0; img.src = urls[0]; }, 4000 * retries);
+    } else img.remove();
+  };
   img.src = urls[0];
   box.appendChild(img);
 }
