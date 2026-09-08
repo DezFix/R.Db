@@ -50,6 +50,8 @@ body.dragging{user-select:none;-webkit-user-select:none}
 .tile .mini{display:none;gap:4px;justify-content:center;margin-top:6px}
 body.editing .tile .mini{display:flex}
 .mini button{background:rgba(0,0,0,.55);color:#fff;border:0;border-radius:8px;cursor:pointer;font-size:11px;padding:3px 7px}
+.mini button img{width:12px;height:12px;display:block}
+.w-shuffle img{width:14px;height:14px;display:block;margin:7px auto 0}
 .empty{color:var(--muted);text-shadow:var(--shadow)}
 .editbar{display:flex;gap:8px;margin-top:22px;justify-content:center}
 body:not(.editing) .editbar{display:none}
@@ -85,6 +87,7 @@ body.dragging .folder-overlay::after{content:attr(data-draghint);position:fixed;
 .dock .spacer{flex:1}
 .dock button{width:40px;height:40px;padding:0;border-radius:50%;opacity:.65;font-size:16px}
 .dock button:hover{opacity:1}
+.dock button img{width:20px;height:20px;display:block;margin:auto}
 .credit{font-size:11px;color:var(--muted);text-shadow:var(--shadow)}
 .credit a{color:inherit}
 
@@ -134,6 +137,7 @@ body.dragging .folder-overlay::after{content:attr(data-draghint);position:fixed;
 .drawer-head button{width:32px;height:32px;flex:none;border-radius:50%;border:1px solid rgba(255,255,255,.2);
   background:rgba(255,255,255,.1);color:var(--text);cursor:pointer;font-size:13px}
 .drawer-head button:hover{background:rgba(255,255,255,.22)}
+.drawer-head button img{width:13px;height:13px;display:block;margin:auto}
 .drawer-body{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:12px;margin-top:14px;padding-right:2px}
 .drawer-body h4{padding-top:12px;border-top:1px solid rgba(255,255,255,.12)}
 .drawer-body h4:first-child{border-top:0;padding-top:0;margin-top:0}
@@ -185,6 +189,7 @@ body.editing .board{background-image:linear-gradient(rgba(255,255,255,.07) 1px,t
 .w-check-item.done span{opacity:.5;text-decoration:line-through}
 .w-check-item .del{display:none;flex:none;background:none;border:0;color:var(--muted);cursor:pointer;font-size:11px;padding:2px 4px}
 .w-check-item:hover .del{display:block}
+.w-check-item .del img{width:11px;height:11px;display:block}
 .w-check-add{display:flex;gap:6px;width:100%;margin-top:6px}
 .w-check-add input{flex:1;min-width:0;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.16);border-radius:9px;color:var(--text);padding:7px 9px;font:inherit;font-size:13px;outline:none}
 .w-check-add input::placeholder{color:var(--muted)}
@@ -240,7 +245,7 @@ body.editing .board{background-image:linear-gradient(rgba(255,255,255,.07) 1px,t
 body.editing .widget .mini{display:flex}
 .rz{position:absolute;right:5px;bottom:5px;width:18px;height:18px;display:none;cursor:nwse-resize;opacity:.7;
   font-size:12px;line-height:18px;text-align:center;touch-action:none;user-select:none}
-.rz::after{content:'◢'}
+.rz::after{content:'';position:absolute;right:2px;bottom:2px;width:0;height:0;border-style:solid;border-width:0 0 12px 12px;border-color:transparent transparent rgba(255,255,255,.7) transparent}
 body.editing .rz{display:block}
 .widget:hover .rz{display:block;opacity:.45}
 .widget:hover .rz:hover{opacity:.9}

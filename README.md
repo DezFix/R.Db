@@ -42,6 +42,11 @@ python -m http.server
 Сеть используется лишь для: фонов Unsplash, иконок, погоды (Open-Meteo), валют (open.er-api.com),
 крипты (CoinGecko) и названий ссылок (microlink/noembed). Аккаунтов и телеметрии нет.
 
+## Атрибуция
+
+- Иконки интерфейса: [Papirus Icon Theme](https://github.com/PapirusDevelopmentTeam/papirus-icon-theme) (GPL-3.0), лежат в `assets/icons/`
+- Фоны: Unsplash; иконки приложений: dashboard-icons
+
 ## Лицензия
 
 GPL-3.0 — см. файл [LICENSE](LICENSE).

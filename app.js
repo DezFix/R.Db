@@ -570,7 +570,7 @@ function buildPreview(iconBox, folder) {
     const k = kids[i];
     if (k) {
       if (k.type === 'folder') {
-        cell.textContent = '📁';
+        cell.appendChild(uiIcon('folder'));
       } else {
         const letter = document.createElement('span');
         letter.className = 'pv-letter';
@@ -615,7 +615,7 @@ function buildChecklist(el, w) {
     const del = document.createElement('button');
     del.className = 'del';
     del.type = 'button';
-    del.textContent = '✕';
+    del.appendChild(uiIcon('delete'));
     del.title = t('remove');
     del.onclick = (e) => { e.preventDefault(); w.items.splice(w.items.indexOf(item), 1); li.remove(); quietSave(); };
     li.append(cb, tx, del);
@@ -647,20 +647,28 @@ function buildChecklist(el, w) {
   el.append(head, list, form);
 }
 
+// иконки интерфейса из Papirus (GPL-3.0, лежат в assets/icons)
+function uiIcon(name, alt = '') {
+  const img = document.createElement('img');
+  img.src = `assets/icons/${name}.svg`;
+  img.alt = alt;
+  img.draggable = false;
+  return img;
+}
 function widgetMini(onEdit, onDel) {
   const mini = document.createElement('div');
   mini.className = 'mini';
   if (onEdit) {
     const bEdit = document.createElement('button');
-    bEdit.textContent = '✎';
     bEdit.title = t('editTip');
     bEdit.onclick = (e) => { e.stopPropagation(); onEdit(); };
+    bEdit.appendChild(uiIcon('edit'));
     mini.append(bEdit);
   }
   const bDel = document.createElement('button');
-  bDel.textContent = '✕';
   bDel.title = t('delTip');
   bDel.onclick = (e) => { e.stopPropagation(); onDel(); };
+  bDel.appendChild(uiIcon('delete'));
   mini.append(bDel);
   return mini;
 }
@@ -682,7 +690,7 @@ function inlineMini(k) {
   const ic = document.createElement('span');
   ic.className = 'mi';
   if (k.type === 'folder') {
-    ic.textContent = '📁';
+    ic.appendChild(uiIcon('folder'));
   } else {
     const lt = document.createElement('span');
     lt.textContent = firstLetter(k.title);
@@ -773,7 +781,7 @@ function widgetEl(w) {
     const sh = document.createElement('button');
     sh.className = 'w-shuffle';
     sh.type = 'button';
-    sh.textContent = '⟳';
+    sh.appendChild(uiIcon('refresh'));
     sh.title = t('quoteAnother');
     sh.onclick = (e) => { e.stopPropagation(); w.qoff = (w.qoff || 0) + 1; paintQuote(w, q, a); quietSave(); };
     el.append(q, a, sh);
@@ -812,7 +820,7 @@ function widgetEl(w) {
       b.className = 'w-mini';
       const ic = document.createElement('span');
       ic.className = 'mi';
-      ic.textContent = '📁';
+      ic.appendChild(uiIcon('folder'));
       const nm = document.createElement('span');
       nm.className = 'mn';
       nm.textContent = t('emptyList');
@@ -1004,10 +1012,10 @@ function tileEl(it) {
   const mini = document.createElement('div');
   mini.className = 'mini';
   const bEdit = document.createElement('button');
-  bEdit.textContent = '✎';
   bEdit.onclick = () => openWModal('edit', it);
+  bEdit.appendChild(uiIcon('edit'));
   const bDel = document.createElement('button');
-  bDel.textContent = '✕';
+  bDel.appendChild(uiIcon('delete'));
   bDel.onclick = () => {
     if (!confirm(t('delOne', it.title))) return;
     const found = findItem(it.id);
@@ -1020,9 +1028,9 @@ function tileEl(it) {
   const _loc = findItem(it.id);
   if (_loc && _loc.parent.children !== state.board) {
     const bTop = document.createElement('button');
-    bTop.textContent = '⤴';
     bTop.title = t('toBoardTip');
     bTop.onclick = () => moveToBoard(it.id);
+    bTop.appendChild(uiIcon('totop'));
     mini.append(bTop);
   }
 
