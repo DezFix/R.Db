@@ -190,6 +190,14 @@ body.editing .board{background-image:linear-gradient(rgba(255,255,255,.07) 1px,t
 .w-check-item .del{display:none;flex:none;background:none;border:0;color:var(--muted);cursor:pointer;font-size:11px;padding:2px 4px}
 .w-check-item:hover .del{display:block}
 .w-check-item .del img{width:11px;height:11px;display:block}
+.drawer-body h4{display:flex;align-items:center;gap:8px}
+.drawer-body h4 .h-ic{width:18px;height:18px;flex:none}
+html:not([data-theme="light"]) .dock button img,
+html:not([data-theme="light"]) .mini button img,
+html:not([data-theme="light"]) .w-shuffle img,
+html:not([data-theme="light"]) .drawer-head button img,
+html:not([data-theme="light"]) .w-check-item .del img{filter:invert(.92)}
+body.editing #editToggle img{filter:none}
 .w-check-add{display:flex;gap:6px;width:100%;margin-top:6px}
 .w-check-add input{flex:1;min-width:0;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.16);border-radius:9px;color:var(--text);padding:7px 9px;font:inherit;font-size:13px;outline:none}
 .w-check-add input::placeholder{color:var(--muted)}

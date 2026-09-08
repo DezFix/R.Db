@@ -1715,7 +1715,6 @@ $('#editToggle').onclick = () => {
   document.body.dataset.edit = isEdit() ? '' : '1';
   render();
 };
-$('#nextBgBtn').onclick = () => nextBg(1);
 $('#bgNextBtn').onclick = () => nextBg(1);
 $('#bgShuffleBtn').onclick = () => {
   const list = bgList();
