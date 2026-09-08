@@ -140,10 +140,10 @@ body.dragging .folder-overlay::after{content:attr(data-draghint);position:fixed;
 .drawer-foot{margin-top:14px}
 .drawer-foot .btn-primary{width:100%}
 .about{font-size:13px;color:var(--muted);margin:0}
-.drawer-body a.btn-ghost{display:block;text-align:center;text-decoration:none}
+.drawer-body a.btn-ghost,.drawer-body a.btn-primary{display:block;text-align:center;text-decoration:none}
 /* секции настроек боксами */
-.set-box{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:12px}
-[data-theme="light"] .set-box{background:rgba(0,0,0,.04);border-color:rgba(0,0,0,.08)}
+.set-box{background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.18);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:12px;box-shadow:0 4px 20px rgba(0,0,0,.18)}
+[data-theme="light"] .set-box{background:rgba(255,255,255,.75);border-color:rgba(0,0,0,.1)}
 .set-box h4{border:0;padding:0;margin:0}
 /* --- простенькие анимации --- */
 @keyframes wpop{from{transform:scale(.85);opacity:0}to{transform:scale(1);opacity:1}}

@@ -95,6 +95,7 @@ ru: {
   toBoardTip: 'Вынести на доску',
   dragHint: 'Отпусти за окном — вынести на доску', crumbDrop: 'Перейти. Сюда же можно перетащить элемент',   setupHint: 'Настрой отображение (✎)', quoteAnother: 'Другая цитата', fetchingTitle: 'Подтягиваю название…',
   aboutText: 'Локальный рабочий стол новой вкладки. Всё хранится в твоём браузере.', kofi: '☕ Поддержать на Ko-fi',
+  donateTitle: '❤️ Поддержать', donateText: 'Если нравится проект — поддержите разработку',
 },
 en: {
   newTab: 'New Tab', addBtn: '+ Add', emptyBoard: 'Empty — enable ✎ and add your first',
@@ -128,6 +129,7 @@ en: {
   toBoardTip: 'Move to board',
   dragHint: 'Drop outside the window — move to board', crumbDrop: 'Go. You can also drop an item here',   setupHint: 'Configure display (✎)', quoteAnother: 'Another quote', fetchingTitle: 'Fetching title…',
   aboutText: 'Local new-tab desktop. Everything stays in your browser.', kofi: '☕ Support on Ko-fi',
+  donateTitle: '❤️ Support', donateText: 'If you like the project — support development',
 },
 };
 function lang() {
