@@ -232,6 +232,7 @@ function migrate(s) {
     if (w.type === 'crypto' && !Array.isArray(w.coins)) w.coins = ['BTC', 'ETH'];
     if (w.type === 'quote' && !w.font) w.font = 'm';
   });
+  healTitles(s.board); // чиним названия, испорченные заглушками Cloudflare/капч
   return s;
 }
 
@@ -364,17 +365,33 @@ function prettyHost(url) {
   try { return new URL(url).hostname.replace(/^www\./, ''); }
   catch { return ''; }
 }
+// мусорные названия со страниц-заглушек (Cloudflare, капчи, 403/404): не подставлять
+const TITLE_JUNK = [/attention required/i, /just a moment/i, /checking your browser/i, /verify you are a human/i, /are you a robot/i, /access denied/i, /forbidden/i, /captcha/i, /enable javascript/i, /cloudflare/i, /^404\b/, /page not found/i];
+function cleanTitle(t) {
+  t = (t || '').trim();
+  return TITLE_JUNK.some((re) => re.test(t)) ? '' : t;
+}
+function healTitles(list) {
+  (list || []).forEach((it) => {
+    if (it.type === 'link' && it.title && TITLE_JUNK.some((re) => re.test(it.title))) {
+      it.title = prettyHost(it.url) || it.title;
+    }
+    if (it.type === 'folder' && it.children) healTitles(it.children);
+  });
+}
 // название страницы по URL: сначала microlink (любой сайт), потом noembed (oEmbed)
 async function fetchTitle(url, signal) {
   try {
     const r = await fetch(`https://api.microlink.io?url=${encodeURIComponent(url)}`, { signal });
     const j = await r.json();
-    if (j && j.data && j.data.title) return String(j.data.title).trim();
+    const t1 = j && j.data && j.data.title ? cleanTitle(j.data.title) : '';
+    if (t1) return t1;
   } catch {}
   try {
     const r = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`, { signal });
     const j = await r.json();
-    if (j && j.title) return String(j.title).trim();
+    const t2 = j && j.title ? cleanTitle(j.title) : '';
+    if (t2) return t2;
   } catch {}
   return '';
 }
