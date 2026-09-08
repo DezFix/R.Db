@@ -453,9 +453,17 @@ function iconCandidates(title, url) {
     }
   };
   if (title) push(norm(title));
+  let host = '', origin = '', isLocal = false;
   try {
-    new URL(url).hostname.toLowerCase().split('.').forEach((p) => { if (p && p !== 'www') push(norm(p)); });
+    const u = new URL(url);
+    host = u.hostname;
+    origin = u.origin;
+    isLocal = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[::1\]|\[fe80)/i.test(host) || !host.includes('.') || /^[0-9a-fA-F:.]+$/.test(host);
+    host.split('.').forEach((p) => { if (p && p !== 'www') push(norm(p)); });
   } catch {}
+  // картинка напрямую с сайта — единственный способ для IP и локалок
+  if (origin) out.push(origin + '/favicon.ico');
+  if (host && !isLocal) out.push(`https://icons.duckduckgo.com/ip3/${host}.ico`);
   const fav = favicon(url);
   if (fav) out.push(fav);
   return out;
