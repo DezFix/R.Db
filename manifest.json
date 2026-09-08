@@ -27,7 +27,12 @@
   ],
   "browser_specific_settings": {
     "gecko": {
-      "id": "rdb-newtab@example.com"
+      "id": "rdb-newtab@example.com",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
     }
   }
 }
