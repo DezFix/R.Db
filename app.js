@@ -232,14 +232,35 @@ function migrate(s) {
   return s;
 }
 
+const SYNC_PREFIX = 'rdb_';
+const SYNC_CHUNK = 7000; // Firefox Sync: макс ~8 КБ на одну запись, ~100 КБ всего
 const store = {
-  hasSync: typeof browser !== 'undefined' && browser.storage?.sync,
+  api() {
+    if (typeof browser !== 'undefined' && browser.storage?.sync) {
+      return {
+        get: (k) => browser.storage.sync.get(k),
+        set: (o) => browser.storage.sync.set(o),
+        remove: (k) => browser.storage.sync.remove(k),
+      };
+    }
+    if (typeof chrome !== 'undefined' && chrome.storage?.sync) {
+      const call = (fn, arg) => new Promise((res, rej) => fn(arg, () => {
+        const err = chrome.runtime.lastError;
+        if (err) rej(new Error(err.message));
+        else res();
+      }));
+      return {
+        get: (k) => new Promise((res) => chrome.storage.sync.get(k, (r) => res(r || {}))),
+        set: (o) => call(chrome.storage.sync.set.bind(chrome.storage.sync), o),
+        remove: (k) => call(chrome.storage.sync.remove.bind(chrome.storage.sync), k),
+      };
+    }
+    return null;
+  },
   async load() {
     try {
-      if (this.hasSync) {
-        const r = await browser.storage.sync.get('state');
-        if (r.state) return migrate(r.state);
-      }
+      const data = await this.loadSync();
+      if (data) return migrate(data);
     } catch {}
     try {
       const raw = localStorage.getItem(LS_KEY);
@@ -247,12 +268,45 @@ const store = {
     } catch {}
     return defaultState();
   },
+  async loadSync() {
+    const api = this.api();
+    if (!api) return null;
+    try {
+      const leg = await api.get('state'); // старый формат одной записью
+      if (leg && leg.state) return leg.state;
+    } catch {}
+    const m = await api.get(SYNC_PREFIX + 'meta');
+    const meta = m && m[SYNC_PREFIX + 'meta'];
+    if (!meta || !meta.n) return null;
+    const keys = [];
+    for (let i = 0; i < meta.n; i++) keys.push(SYNC_PREFIX + 'c' + i);
+    const parts = await api.get(keys);
+    let s = '';
+    for (let i = 0; i < meta.n; i++) {
+      const c = parts[SYNC_PREFIX + 'c' + i];
+      if (typeof c !== 'string') return null;
+      s += c;
+    }
+    return JSON.parse(s);
+  },
   async save(st) {
     try { localStorage.setItem(LS_KEY, JSON.stringify(st)); } catch {}
-    try {
-      if (this.hasSync) await browser.storage.sync.set({ state: st });
-      else if (typeof chrome !== 'undefined' && chrome.storage?.sync) chrome.storage.sync.set({ state: st });
-    } catch {}
+    try { await this.saveSync(st); } catch {}
+  },
+  async saveSync(st) {
+    const api = this.api();
+    if (!api) return;
+    const s = JSON.stringify(st);
+    const n = Math.ceil(s.length / SYNC_CHUNK);
+    if (n > 14) return; // ~100 КБ квота sync: большие сетапы остаются локальными
+    const old = await api.get(SYNC_PREFIX + 'meta');
+    const oldN = (old && old[SYNC_PREFIX + 'meta'] && old[SYNC_PREFIX + 'meta'].n) || 0;
+    for (let i = 0; i < n; i++) {
+      await api.set({ [SYNC_PREFIX + 'c' + i]: s.slice(i * SYNC_CHUNK, (i + 1) * SYNC_CHUNK) });
+    }
+    await api.set({ [SYNC_PREFIX + 'meta']: { n, ts: Date.now() } });
+    for (let i = n; i < oldN; i++) await api.remove(SYNC_PREFIX + 'c' + i);
+    try { await api.remove('state'); } catch {} // чистка старого формата
   },
 };
 
