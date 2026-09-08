@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "R.Db — рабочий стол новой вкладки",
   "short_name": "R.Db",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Минималистичный рабочий стол для новой вкладки: папки OnePlus, виджеты, свои фоны.",
   "icons": {
     "48": "icons/icon48.png",
