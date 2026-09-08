@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "R.Db — рабочий стол новой вкладки",
+  "short_name": "R.Db",
+  "version": "1.0.0",
+  "description": "Минималистичный рабочий стол для новой вкладки: папки OnePlus, виджеты, свои фоны.",
+  "icons": {
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "R.Db"
+  },
+  "chrome_url_overrides": {
+    "newtab": "index.html"
+  },
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://api.open-meteo.com/*",
+    "https://geocoding-api.open-meteo.com/*",
+    "https://open.er-api.com/*",
+    "https://api.coingecko.com/*",
+    "https://api.microlink.io/*",
+    "https://noembed.com/*"
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "rdb-newtab@example.com"
+    }
+  }
+}
