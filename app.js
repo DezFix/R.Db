@@ -321,6 +321,7 @@ let state = defaultState();
 let path = []; // стек id открытых папок; пусто = доска
 let wEditing = null;
 let draggedId = null;
+let dropAfter = false; // дроп в нижнюю половину плитки = вставить после неё
 let bgTimer = null;
 let showingA = true;
 const isEdit = () => document.body.dataset.edit === '1';
@@ -1143,9 +1144,15 @@ function tileEl(it) {
   }
 
   el.addEventListener('dragstart', (e) => { draggedId = it.id; document.body.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
-  el.addEventListener('dragover', (e) => { e.preventDefault(); el.classList.add('drag-over'); });
-  el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
-  el.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); el.classList.remove('drag-over'); moveItem(draggedId, it.id); });
+  el.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    el.classList.add('drag-over');
+    const r = el.getBoundingClientRect();
+    dropAfter = (e.clientY - r.top) > r.height / 2;
+    el.classList.toggle('drop-after', dropAfter);
+  });
+  el.addEventListener('dragleave', () => { el.classList.remove('drag-over'); el.classList.remove('drop-after'); });
+  el.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); el.classList.remove('drag-over'); el.classList.remove('drop-after'); moveItem(draggedId, it.id, dropAfter); dropAfter = false; });
   el.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1157,7 +1164,7 @@ function tileEl(it) {
   return el;
 }
 
-function moveItem(dragId, targetId) {
+function moveItem(dragId, targetId, after = false) {
   if (!dragId || dragId === targetId) return;
   const d = findItem(dragId), t = findItem(targetId);
   if (!d || !t) return;
@@ -1168,11 +1175,12 @@ function moveItem(dragId, targetId) {
     t.item.children.push(d.item);
   } else if (d.parent !== t.parent) {
     d.parent.children.splice(d.parent.children.findIndex((x) => x.id === dragId), 1);
-    t.parent.children.splice(t.parent.children.findIndex((x) => x.id === targetId), 0, d.item);
+    const to = t.parent.children.findIndex((x) => x.id === targetId) + (after ? 1 : 0);
+    t.parent.children.splice(to, 0, d.item);
   } else {
     const arr = d.parent.children;
     const [m] = arr.splice(arr.findIndex((x) => x.id === dragId), 1);
-    arr.splice(arr.findIndex((x) => x.id === targetId), 0, m);
+    arr.splice(arr.findIndex((x) => x.id === targetId) + (after ? 1 : 0), 0, m);
   }
   save();
 }
@@ -1841,7 +1849,7 @@ $('#folderAddBtn').onclick = () => openWModal('create', null, 'link');
 // клик по фону всегда закрывает папку: mousedown при настоящем drag-and-drop
 // на фон попасть не может (drag стартует с плитки), так что гард не нужен и не должен залипать
 $('#folderView').addEventListener('mousedown', (e) => { if (e.target.id === 'folderView') { path = []; render(); } });
-document.addEventListener('dragend', () => { draggedId = null; document.body.classList.remove('dragging'); });
+document.addEventListener('dragend', () => { draggedId = null; dropAfter = false; document.body.classList.remove('dragging'); });
 // страховка: если dragend потерялся, класс-подсказка не должен залипать
 document.addEventListener('pointerup', () => document.body.classList.remove('dragging'));
 // дроп на фон за пределами окна папки = вынести элемент на доску
