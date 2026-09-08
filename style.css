@@ -132,12 +132,8 @@ body.dragging .folder-overlay::after{content:attr(data-draghint);position:fixed;
   padding:18px;animation:slideIn .22s ease;color:var(--text)}
 [data-theme="light"] .drawer{background:rgba(255,255,255,.92)}
 @keyframes slideIn{from{transform:translateX(48px);opacity:0}to{transform:none;opacity:1}}
-.drawer-head{display:flex;align-items:center;justify-content:space-between}
+.drawer-head{display:flex;align-items:center;justify-content:center}
 .drawer-head h3{margin:0;font-size:17px}
-.drawer-head button{width:32px;height:32px;flex:none;border-radius:50%;border:1px solid rgba(255,255,255,.2);
-  background:rgba(255,255,255,.1);color:var(--text);cursor:pointer;font-size:13px}
-.drawer-head button:hover{background:rgba(255,255,255,.22)}
-.drawer-head button img{width:13px;height:13px;display:block;margin:auto}
 .drawer-body{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:12px;margin-top:14px;padding-right:2px}
 .drawer-body h4{padding-top:12px;border-top:1px solid rgba(255,255,255,.12)}
 .drawer-body h4:first-child{border-top:0;padding-top:0;margin-top:0}

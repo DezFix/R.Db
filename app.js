@@ -1810,7 +1810,6 @@ $('#bgShuffleBtn').onclick = () => {
 
 $('#settingsBtn').onclick = () => { syncSettingsForm(); $('#settingsModal').hidden = false; };
 $('#settingsBg').onclick = () => { $('#settingsModal').hidden = true; };
-$('#settingsClose').onclick = () => { $('#settingsModal').hidden = true; };
 $('#settingsSave').onclick = () => {
   const b = state.settings.bg;
   state.settings.theme = $('#sTheme').value;
