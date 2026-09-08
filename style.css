@@ -236,6 +236,11 @@ body.editing #editToggle img{filter:none}
 /* цитата */
 .w-quote{font-size:13px;line-height:1.5;font-style:italic;overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical}
 .w-quote-a{font-size:11px;color:var(--muted);margin-top:6px}
+.fs-s .w-quote{font-size:13px}
+.fs-m .w-quote{font-size:16px}
+.fs-l .w-quote{font-size:20px}
+.fs-m .w-quote-a{font-size:12px}
+.fs-l .w-quote-a{font-size:13px}
 .w-shuffle{position:absolute;left:8px;bottom:8px;display:none;width:28px;height:28px;border-radius:50%;border:1px solid rgba(255,255,255,.2);background:rgba(0,0,0,.35);color:#fff;cursor:pointer;font-size:14px;line-height:1}
 .widget:hover .w-shuffle{display:block}
 /* погода: полоса часов */

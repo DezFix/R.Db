@@ -72,6 +72,7 @@ ru: {
   tCurrency: 'Курсы валют', tCrypto: 'Крипта', tQuote: 'Цитата дня',
   fTitle: 'Название', fUrl: 'URL', fCity: 'Город', fCur: 'Текущая погода', fDays: 'Дней (0–7)', fHours: 'Часов (0–24, шаг 3)',
   fBase: 'Базовая валюта', fSyms: 'Валюты', fCoins: 'Монеты через запятую',
+  fFont: 'Размер текста', fontS: 'Мелкий', fontM: 'Средний', fontL: 'Крупный',
   save: 'Сохранить', cancel: 'Отмена', sTitle: 'Настройки', sBg: 'Фон', sSrc: 'Источник',
   sCurated: 'Карусель (подборка)', sCustom: 'Свои картинки (ссылки)', sUpload: 'Своя картинка (файл)',
   sGradient: 'Градиент', sColor: 'Цвет', sNextBg: 'Следующий фон', sShuffle: 'Случайный', sChange: 'Смена фона',
@@ -106,6 +107,7 @@ en: {
   tCurrency: 'Currency', tCrypto: 'Crypto', tQuote: 'Quote of the day',
   fTitle: 'Name', fUrl: 'URL', fCity: 'City', fCur: 'Current weather', fDays: 'Days (0–7)', fHours: 'Hours (0–24, step 3)',
   fBase: 'Base currency', fSyms: 'Currencies', fCoins: 'Coins, comma separated',
+  fFont: 'Text size', fontS: 'Small', fontM: 'Medium', fontL: 'Large',
   save: 'Save', cancel: 'Cancel', sTitle: 'Settings', sBg: 'Background', sSrc: 'Source',
   sCurated: 'Carousel (curated)', sCustom: 'Own images (links)', sUpload: 'Own image (file)',
   sGradient: 'Gradient', sColor: 'Color', sNextBg: 'Next background', sShuffle: 'Random', sChange: 'Rotate every',
@@ -228,6 +230,7 @@ function migrate(s) {
       if (typeof w.hours !== 'number') w.hours = 0;
     }
     if (w.type === 'crypto' && !Array.isArray(w.coins)) w.coins = ['BTC', 'ETH'];
+    if (w.type === 'quote' && !w.font) w.font = 'm';
   });
   return s;
 }
@@ -795,6 +798,7 @@ function widgetEl(w) {
     el.title = 'CoinGecko';
     el.appendChild(widgetMini(() => openWModal('edit', w), () => delWidget(w.id)));
   } else if (w.type === 'quote') {
+    el.classList.add('fs-' + (w.font || 'm'));
     const q = document.createElement('div');
     q.className = 'w-quote';
     const a = document.createElement('div');
@@ -1528,6 +1532,7 @@ function openWModal(mode, widget = null, preset = null, showAll = false) {
   $('#wBase').value = widget?.base || 'UAH';
   paintSyms(widget?.symbols || ['USD', 'EUR']);
   $('#wCoins').value = (widget?.coins || ['BTC', 'ETH']).join(', ');
+  $('#wFont').value = widget?.font || 'm';
   syncWForm();
   ($('#wCityWrap').style.display !== 'none' ? $('#wCity') : $('#wBaseWrap').style.display !== 'none' ? $('#wBase') : $('#wTitleWrap').style.display !== 'none' ? $('#wTitle') : $('#wType')).focus();
 }
@@ -1589,6 +1594,7 @@ function syncWForm() {
   $('#wBaseWrap').style.display = isCur ? '' : 'none';
   $('#wSymsWrap').style.display = isCur ? '' : 'none';
   $('#wCoinsWrap').style.display = t === 'crypto' ? '' : 'none';
+  $('#wFontWrap').style.display = t === 'quote' ? '' : 'none';
 }
 
 // ---------- контекстное меню (правая кнопка) ----------
@@ -1726,6 +1732,7 @@ $('#wmodalForm').onsubmit = (e) => {
     }
     else if (t === 'currency') { w.base = $('#wBase').value || 'UAH'; const ps = getSyms(); w.symbols = ps.length ? ps : ['USD', 'EUR']; }
     else if (t === 'crypto') { const cc = parseCoins($('#wCoins').value); w.coins = cc.length ? cc : ['BTC', 'ETH']; }
+    else if (t === 'quote') { w.font = $('#wFont').value || 'm'; }
   } else {
     const { list } = getFolderByPath();
     const target = (list === state.board || t === 'link' || t === 'folder') ? list : state.board;
@@ -1741,7 +1748,7 @@ $('#wmodalForm').onsubmit = (e) => {
     else if (t === 'weather') target.push({ id: uid(), type: 'weather', title: I18N[lang()].tWeather, city: $('#wCity').value.trim(), showCurrent: $('#wCur').checked, days: Math.min(7, Math.max(0, +$('#wDays').value || 0)), hours: Math.min(24, Math.max(0, +$('#wHours').value || 0)), ...r });
     else if (t === 'currency') { const cs = getSyms(); target.push({ id: uid(), type: 'currency', title: I18N[lang()].tCurrency, base: $('#wBase').value || 'UAH', symbols: cs.length ? cs : ['USD', 'EUR'], ...r }); }
     else if (t === 'crypto') { const cc = parseCoins($('#wCoins').value); target.push({ id: uid(), type: 'crypto', title: I18N[lang()].tCrypto, coins: cc.length ? cc : ['BTC', 'ETH'], ...r }); }
-    else if (t === 'quote') target.push({ id: uid(), type: 'quote', title: I18N[lang()].tQuote, ...r });
+    else if (t === 'quote') target.push({ id: uid(), type: 'quote', title: I18N[lang()].tQuote, font: $('#wFont').value || 'm', ...r });
   }
   closeWModal(); save();
 };
