@@ -73,6 +73,7 @@ ru: {
   tCurrency: 'Курсы валют', tCrypto: 'Крипта', tQuote: 'Цитата дня',
   fTitle: 'Название', fUrl: 'URL', fCity: 'Город', fCur: 'Текущая погода', fDays: 'Дней (0–7)', fHours: 'Часов (0–24, шаг 3)',
   fBase: 'Базовая валюта', fSyms: 'Валюты', fCoins: 'Монеты через запятую',
+  fIconAuto: 'Подтягивать иконку автоматически', fIcon: 'Своя иконка (URL)', fIconPh: 'https://… — пусто = авто',
   fFont: 'Размер текста', fontS: 'Мелкий', fontM: 'Средний', fontL: 'Крупный',
   save: 'Сохранить', cancel: 'Отмена', sTitle: 'Настройки', sBg: 'Фон', sSrc: 'Источник',
   sCurated: 'Карусель (подборка)', sCustom: 'Свои картинки (ссылки)', sUpload: 'Своя картинка (файл)',
@@ -108,6 +109,7 @@ en: {
   tCurrency: 'Currency', tCrypto: 'Crypto', tQuote: 'Quote of the day',
   fTitle: 'Name', fUrl: 'URL', fCity: 'City', fCur: 'Current weather', fDays: 'Days (0–7)', fHours: 'Hours (0–24, step 3)',
   fBase: 'Base currency', fSyms: 'Currencies', fCoins: 'Coins, comma separated',
+  fIconAuto: 'Auto-fetch icon', fIcon: 'Custom icon (URL)', fIconPh: 'https://… — empty = auto',
   fFont: 'Text size', fontS: 'Small', fontM: 'Medium', fontL: 'Large',
   save: 'Save', cancel: 'Cancel', sTitle: 'Settings', sBg: 'Background', sSrc: 'Source',
   sCurated: 'Carousel (curated)', sCustom: 'Own images (links)', sUpload: 'Own image (file)',
@@ -443,8 +445,11 @@ const ICON_ALIASES = {
 const ICON_CUSTOM = {
   'community-scripts.github.io': 'https://cdn.jsdelivr.net/gh/loganmarchione/homelab-svg-assets/assets/proxmox.svg',
 };
-function iconCandidates(title, url) {
+function iconCandidates(link) {
+  const title = link.title, url = link.url;
   const out = [];
+  if (link.icon) out.push(link.icon); // своя ссылка — всегда первая
+  if (!link.noicon) {
   const seen = new Set();
   const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const push = (n) => {
@@ -473,10 +478,11 @@ function iconCandidates(title, url) {
   if (host && !isLocal) out.push(`https://icons.duckduckgo.com/ip3/${host}.ico`);
   const fav = favicon(url);
   if (fav) out.push(fav);
+  } // noicon: только своя ссылка (или буква)
   return out;
 }
 function appendIconImg(box, link, cls) {
-  const urls = iconCandidates(link.title, link.url);
+  const urls = iconCandidates(link);
   if (!urls.length) return;
   const img = document.createElement('img');
   img.loading = 'lazy';
@@ -1593,6 +1599,8 @@ function openWModal(mode, widget = null, preset = null, showAll = false) {
   paintBase(widget?.base || 'UAH');
   paintSyms(widget?.symbols || ['USD', 'EUR']);
   $('#wCoins').value = (widget?.coins || ['BTC', 'ETH']).join(', ');
+  $('#wIconAuto').checked = !widget?.noicon;
+  $('#wIcon').value = widget?.icon || '';
   $('#wFont').value = widget?.font || 'm';
   syncWForm();
   ($('#wCityWrap').style.display !== 'none' ? $('#wCity') : $('#wBaseWrap').style.display !== 'none' ? $('#wBase') : $('#wTitleWrap').style.display !== 'none' ? $('#wTitle') : $('#wType')).focus();
@@ -1642,10 +1650,20 @@ async function tryAutofill() {
     if (!sig.aborted) titleEl.placeholder = oldPh;
   }
 }
+function paintIconPrev() {
+  const prev = $('#wIconPrev');
+  const v = ($('#wIcon').value || '').trim();
+  if (!v || $('#wType').value !== 'link') { prev.hidden = true; prev.removeAttribute('src'); return; }
+  prev.hidden = false;
+  prev.onerror = () => { prev.hidden = true; };
+  if (prev.getAttribute('src') !== v) prev.src = v;
+}
 function syncWForm() {
   const t = $('#wType').value;
   $('#wTitleWrap').style.display = ['link', 'folder', 'note', 'checklist'].includes(t) ? '' : 'none';
   $('#wUrlWrap').style.display = t === 'link' ? '' : 'none';
+  $('#wIconAutoWrap').style.display = t === 'link' ? '' : 'none';
+  $('#wIconWrap').style.display = t === 'link' ? '' : 'none';
   const isW = t === 'weather';
   $('#wCityWrap').style.display = isW ? '' : 'none';
   $('#wCurWrap').style.display = isW ? '' : 'none';
@@ -1656,6 +1674,7 @@ function syncWForm() {
   $('#wSymsWrap').style.display = isCur ? '' : 'none';
   $('#wCoinsWrap').style.display = t === 'crypto' ? '' : 'none';
   $('#wFontWrap').style.display = t === 'quote' ? '' : 'none';
+  paintIconPrev();
 }
 
 // ---------- контекстное меню (правая кнопка) ----------
@@ -1771,6 +1790,7 @@ function enhanceNumbers() {
 $('#addBtn').onclick = () => openWModal('create');
 
 $('#wType').onchange = syncWForm;
+$('#wIcon').addEventListener('input', paintIconPrev);
 $('#wmodalCancel').onclick = closeWModal;
 $('#wmodal').addEventListener('mousedown', (e) => { if (e.target.id === 'wmodal') closeWModal(); });
 $('#wmodalForm').onsubmit = (e) => {
@@ -1781,7 +1801,7 @@ $('#wmodalForm').onsubmit = (e) => {
     const w = wEditing.widget;
     if (t !== 'link') delete w.url;
     if (t !== 'weather' && t !== 'forecast') delete w.city;
-    if (t === 'link') { w.title = title; w.url = normalizeUrl($('#wUrl').value); }
+    if (t === 'link') { w.title = title; w.url = normalizeUrl($('#wUrl').value); const ci = ($('#wIcon').value || '').trim(); if (ci) w.icon = ci; else delete w.icon; if ($('#wIconAuto').checked) delete w.noicon; else w.noicon = true; }
     else if (t === 'folder' || t === 'note' || t === 'checklist') { w.title = title; }
     else if (t === 'weather') {
       w.city = $('#wCity').value.trim() || '';
@@ -1801,7 +1821,8 @@ $('#wmodalForm').onsubmit = (e) => {
     if (t === 'link') {
       const url = normalizeUrl($('#wUrl').value);
       if (!url) return alert(t('needUrl'));
-      target.push({ id: uid(), type: 'link', title, url, ...r });
+      const ci0 = ($('#wIcon').value || '').trim();
+      target.push({ id: uid(), type: 'link', title, url, ...(ci0 ? { icon: ci0 } : {}), ...(!$('#wIconAuto').checked ? { noicon: true } : {}), ...r });
     }
     else if (t === 'folder') target.push({ id: uid(), type: 'folder', title, children: [], ...r });
     else if (t === 'note') target.push({ id: uid(), type: 'note', title, text: '', ...r });
