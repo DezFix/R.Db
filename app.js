@@ -167,6 +167,7 @@ function defaultState() {
       bg: { mode: 'curated', blur: 3, dim: 35, intervalMin: 30, index: Math.floor(Math.random() * CURATED.length), lastChange: 0, customUrls: [], upload: '', color: PRESETS[0] },
     },
     geo: {},
+    fxHist: {},
     board: [
       { id: uid(), type: 'folder', title: navRu ? 'Доки' : 'Docs', fx: 0.02, fy: 0.02, fw: 0.15, fh: 0.30, children: [
         { id: uid(), type: 'link', title: 'MDN', url: 'https://developer.mozilla.org' },
@@ -212,6 +213,7 @@ function migrate(s) {
     delete s.tree;
   }
   if (typeof s.geo !== 'object' || !s.geo) s.geo = {};
+  if (typeof s.fxHist !== 'object' || !s.fxHist) s.fxHist = {};
   if (s.board.length && s.board.some((w) => w.fx === undefined)) flowLayout(s.board);
   s.board.forEach((w) => {
     const d = DEF_RECT[w.type] || DEF_RECT.link;
@@ -1411,20 +1413,41 @@ async function loadCurrency(w) {
       const j = await r.json();
       if (j.result !== 'success' || !j.rates) throw 0;
       d = fxMem[base] = { t: Date.now(), rates: j.rates };
+      // суточный снапшот для дельты: ротируем не чаще раза в ~20 часов
+      state.fxHist = state.fxHist || {};
+      const hh = state.fxHist[base] || (state.fxHist[base] = {});
+      if (!hh.today || Date.now() - hh.today.ts > 20 * 36e5) {
+        if (hh.today) hh.prev = hh.today;
+        hh.today = { ts: Date.now(), rates: d.rates };
+        store.save(state); // тихо, без перерендера
+      }
     }
     box.innerHTML = '';
+    const h = (state.fxHist || {})[base] || {};
+    const prev = h.prev && h.prev.rates;
     syms.forEach((s) => {
       if (s === base || !d.rates[s]) return;
+      const cur = 1 / d.rates[s];
       const row = document.createElement('div');
       row.className = 'w-row';
-      const cur = document.createElement('span');
-      cur.textContent = `${CUR_SYM[s] || ''} ${s}`.trim();
+      const curEl = document.createElement('span');
+      curEl.textContent = `${CUR_SYM[s] || ''} ${s}`.trim();
       const sp = document.createElement('span');
       sp.className = 'd';
       const val = document.createElement('span');
       val.className = 'v';
-      val.textContent = `${fmtMoney(1 / d.rates[s])} ${CUR_SYM[base] || base}`;
-      row.append(cur, sp, val);
+      val.textContent = `${fmtMoney(cur)} ${CUR_SYM[base] || base}`;
+      row.append(curEl, sp, val);
+      const p = prev && prev[s] ? 1 / prev[s] : null;
+      if (p) {
+        const pct = (cur - p) / p * 100;
+        const ch = document.createElement('span');
+        ch.className = pct > 0 ? 'up' : pct < 0 ? 'down' : '';
+        ch.textContent = `${pct > 0 ? '+' : ''}${Math.abs(pct).toFixed(1).replace('.', ',')}%`;
+        const dl = cur - p;
+        row.title = `${dl >= 0 ? '+' : ''}${fmtMoney(dl)} ${base}`;
+        val.append(' ', ch);
+      }
       box.appendChild(row);
     });
     if (!box.children.length) box.innerHTML = `<div class="w-row"><span class="d">${t('noCurr')}</span></div>`;
