@@ -62,9 +62,97 @@ function placeOnBoard(item) {
   if (item.fx === undefined) Object.assign(item, cascadeRect(item.type));
 }
 
+const I18N = {
+ru: {
+  newTab: 'Новая вкладка', addBtn: '+ Добавить', emptyBoard: 'Пусто — включи ✎ и добавь первое',
+  folderEmpty: 'Пусто — нажми + сверху, чтобы добавить', nextBg: 'Следующий фон', editMode: 'Редактировать',
+  settings: 'Настройки', photo: 'Фото:', folderAdd: 'Добавить закладку', itemsCount: '{0} эл.', emptyList: 'пусто',
+  wNew: 'Новое', wEdit: 'Изменить', wNewLink: 'Новая ссылка', wNewFolder: 'Новая папка', wNewWidget: 'Новый виджет',
+  wType: 'Тип', tLink: 'Ссылка', tFolder: 'Папка', tNote: 'Заметка', tChecklist: 'Чек-лист', tWeather: 'Погода',
+  tCurrency: 'Курсы валют', tCrypto: 'Крипта', tQuote: 'Цитата дня',
+  fTitle: 'Название', fUrl: 'URL', fCity: 'Город', fCur: 'Текущая погода', fDays: 'Дней (0–7)', fHours: 'Часов (0–24, шаг 3)',
+  fBase: 'Базовая валюта', fSyms: 'Валюты', fCoins: 'Монеты через запятую',
+  save: 'Сохранить', cancel: 'Отмена', sTitle: 'Настройки', sBg: '🖼 Фон', sSrc: 'Источник',
+  sCurated: 'Карусель (подборка)', sCustom: 'Свои картинки (ссылки)', sUpload: 'Своя картинка (файл)',
+  sGradient: 'Градиент', sColor: 'Цвет', sNextBg: 'Следующий фон', sShuffle: 'Случайный', sChange: 'Смена фона',
+  int0: 'При каждом открытии', int1: 'Каждую минуту', int5: 'Каждые 5 минут', int15: 'Каждые 15 минут',
+  int30: 'Каждые 30 минут', int1440: 'Раз в день',
+  sCustomUrls: 'Свои URL (по одному на строку)', sUploadFile: 'Файл с компьютера', sUploadClear: 'Убрать файл',
+  sColorVal: 'Цвет / градиент CSS', sBlur: 'Блюр:', sDim: 'Затемнение:', sLook: '🎨 Оформление',
+  sTheme: 'Тема текста', sThemeDark: 'Белая (для фото)', sThemeLight: 'Тёмная (для светлого)', sClock: 'Показывать часы',
+  sLang: 'Язык', sLangAuto: 'Авто (язык браузера)', sData: '💾 Данные', sAbout: 'ℹ️ О приложении',
+  resetBtn: 'Сброс', done: 'Готово',
+  mOpen: 'Открыть', mCopy: 'Копировать ссылку', mEdit: 'Изменить', mRename: 'Переименовать',
+  mToBoard: 'Вынести на доску', mDel: 'Удалить', mAddLink: 'Создать ссылку', mAddFolder: 'Создать папку',
+  mAddWidget: 'Создать виджет', mEditCity: 'Изменить город', mSetupWeather: 'Настроить погоду',
+  mSetupCurr: 'Настроить валюты', mSetupCoins: 'Настроить монеты',
+  needUrl: 'Вставь URL', delOne: 'Удалить «{0}»?', delFolder: 'Удалить папку «{0}» с содержимым ({1})?',
+  selfNest: 'Нельзя вложить папку в саму себя', onlyBoard: 'Этот виджет живёт только на доске',
+  badBackup: 'Битый файл бэкапа', resetConfirm: 'Стереть все ссылки и настройки?', badFile: 'Не смог прочитать файл',
+  noCity: 'Нет города', setCity: 'Укажи город (✎)', noConn: 'Нет связи', noData: 'Нет данных',
+  noCurr: 'Нет валют — настрой ✎', untitled: 'Без названия', all: 'все', add: 'Добавить', newItem: '+ пункт',
+  writePh: 'Пиши...', remove: 'Убрать', resize: 'Размер', editTip: 'Изменить', delTip: 'Удалить',
+  toBoardTip: 'Вынести на доску',
+  dragHint: 'Отпусти за окном — вынести на доску', crumbDrop: 'Перейти. Сюда же можно перетащить элемент',   setupHint: 'Настрой отображение (✎)', quoteAnother: 'Другая цитата', fetchingTitle: 'Подтягиваю название…',
+  aboutText: 'Локальный рабочий стол новой вкладки. Всё хранится в твоём браузере.', kofi: '☕ Поддержать на Ko-fi',
+},
+en: {
+  newTab: 'New Tab', addBtn: '+ Add', emptyBoard: 'Empty — enable ✎ and add your first',
+  folderEmpty: 'Empty — press + above to add', nextBg: 'Next background', editMode: 'Edit',
+  settings: 'Settings', photo: 'Photo:', folderAdd: 'Add bookmark', itemsCount: '{0} items', emptyList: 'empty',
+  wNew: 'New', wEdit: 'Edit', wNewLink: 'New link', wNewFolder: 'New folder', wNewWidget: 'New widget',
+  wType: 'Type', tLink: 'Link', tFolder: 'Folder', tNote: 'Note', tChecklist: 'Checklist', tWeather: 'Weather',
+  tCurrency: 'Currency', tCrypto: 'Crypto', tQuote: 'Quote of the day',
+  fTitle: 'Name', fUrl: 'URL', fCity: 'City', fCur: 'Current weather', fDays: 'Days (0–7)', fHours: 'Hours (0–24, step 3)',
+  fBase: 'Base currency', fSyms: 'Currencies', fCoins: 'Coins, comma separated',
+  save: 'Save', cancel: 'Cancel', sTitle: 'Settings', sBg: '🖼 Background', sSrc: 'Source',
+  sCurated: 'Carousel (curated)', sCustom: 'Own images (links)', sUpload: 'Own image (file)',
+  sGradient: 'Gradient', sColor: 'Color', sNextBg: 'Next background', sShuffle: 'Random', sChange: 'Rotate every',
+  int0: 'On every open', int1: 'Every minute', int5: 'Every 5 minutes', int15: 'Every 15 minutes',
+  int30: 'Every 30 minutes', int1440: 'Once a day',
+  sCustomUrls: 'Own URLs (one per line)', sUploadFile: 'File from computer', sUploadClear: 'Remove file',
+  sColorVal: 'Color / CSS gradient', sBlur: 'Blur:', sDim: 'Dim:', sLook: '🎨 Appearance',
+  sTheme: 'Text theme', sThemeDark: 'White (for photos)', sThemeLight: 'Dark (for light)', sClock: 'Show clock',
+  sLang: 'Language', sLangAuto: 'Auto (browser language)', sData: '💾 Data', sAbout: 'ℹ️ About',
+  resetBtn: 'Reset', done: 'Done',
+  mOpen: 'Open', mCopy: 'Copy link', mEdit: 'Edit', mRename: 'Rename',
+  mToBoard: 'Move to board', mDel: 'Delete', mAddLink: 'Create link', mAddFolder: 'Create folder',
+  mAddWidget: 'Create widget', mEditCity: 'Change city', mSetupWeather: 'Configure weather',
+  mSetupCurr: 'Configure currencies', mSetupCoins: 'Configure coins',
+  needUrl: 'Paste a URL', delOne: 'Delete “{0}”?', delFolder: 'Delete folder “{0}” with {1} items?',
+  selfNest: 'Cannot nest a folder into itself', onlyBoard: 'This widget lives on the board only',
+  badBackup: 'Broken backup file', resetConfirm: 'Erase all links and settings?', badFile: 'Could not read file',
+  noCity: 'No city', setCity: 'Set a city (✎)', noConn: 'Offline', noData: 'No data',
+  noCurr: 'No currencies — configure (✎)', untitled: 'Untitled', all: 'all', add: 'Add', newItem: '+ item',
+  writePh: 'Write...', remove: 'Remove', resize: 'Resize', editTip: 'Edit', delTip: 'Delete',
+  toBoardTip: 'Move to board',
+  dragHint: 'Drop outside the window — move to board', crumbDrop: 'Go. You can also drop an item here',   setupHint: 'Configure display (✎)', quoteAnother: 'Another quote', fetchingTitle: 'Fetching title…',
+  aboutText: 'Local new-tab desktop. Everything stays in your browser.', kofi: '☕ Support on Ko-fi',
+},
+};
+function lang() {
+  const l = state.settings.lang || 'auto';
+  if (l === 'ru' || l === 'en') return l;
+  return (navigator.language || 'en').toLowerCase().startsWith('ru') ? 'ru' : 'en';
+}
+function t(key, ...a) {
+  const d = (I18N[lang()] && I18N[lang()][key]) || I18N.en[key] || key;
+  return String(d).replace(/\{(\d)\}/g, (_, i) => (a[+i] ?? ''));
+}
+function loc() { return lang() === 'ru' ? 'ru-RU' : 'en-US'; }
+function applyI18n() {
+  document.documentElement.lang = lang();
+  document.title = t('newTab');
+  document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-ph]').forEach((el) => { el.placeholder = t(el.dataset.i18nPh); });
+  document.querySelectorAll('[data-i18n-title]').forEach((el) => { el.title = t(el.dataset.i18nTitle); });
+  const fv = $('#folderView');
+  if (fv) fv.dataset.draghint = t('dragHint');
+}
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
 function defaultState() {
+  const navRu = (navigator.language || 'en').toLowerCase().startsWith('ru');
   return {
     settings: {
       theme: 'dark',
@@ -73,20 +161,20 @@ function defaultState() {
     },
     geo: {},
     board: [
-      { id: uid(), type: 'folder', title: 'Доки', fx: 0.02, fy: 0.02, fw: 0.15, fh: 0.30, children: [
+      { id: uid(), type: 'folder', title: navRu ? 'Доки' : 'Docs', fx: 0.02, fy: 0.02, fw: 0.15, fh: 0.30, children: [
         { id: uid(), type: 'link', title: 'MDN', url: 'https://developer.mozilla.org' },
         { id: uid(), type: 'link', title: 'GitHub', url: 'https://github.com' },
         { id: uid(), type: 'link', title: 'Stack Overflow', url: 'https://stackoverflow.com' },
       ]},
       { id: uid(), type: 'link', title: 'YouTube', url: 'https://youtube.com', fx: 0.19, fy: 0.02, fw: 0.15, fh: 0.30 },
-      { id: uid(), type: 'note', title: 'Заметки', text: '• первая мысль', fx: 0.36, fy: 0.02, fw: 0.34, fh: 0.42 },
-      { id: uid(), type: 'weather', title: 'Погода', city: 'Москва', fx: 0.72, fy: 0.02, fw: 0.24, fh: 0.30 },
+      { id: uid(), type: 'note', title: navRu ? 'Заметки' : 'Notes', text: navRu ? '• первая мысль' : '• first thought', fx: 0.36, fy: 0.02, fw: 0.34, fh: 0.42 },
+      { id: uid(), type: 'weather', title: navRu ? 'Погода' : 'Weather', city: 'Москва', fx: 0.72, fy: 0.02, fw: 0.24, fh: 0.30 },
     ],
   };
 }
 
 function toWidget(it) {
-  const base = { id: it.id || uid(), type: it.type, title: it.title || 'Без названия', w: 2, h: 2 };
+  const base = { id: it.id || uid(), type: it.type, title: it.title || t('untitled'), w: 2, h: 2 };
   if (it.type === 'folder') return { ...base, children: Array.isArray(it.children) ? it.children : [] };
   return { ...base, url: it.url || '' };
 }
@@ -111,6 +199,7 @@ function migrate(s) {
   if (!s || !s.settings || (!Array.isArray(s.board) && !Array.isArray(s.tree))) return defaultState();
   s.settings.bg = s.settings.bg || { mode: 'curated', blur: 3, dim: 35, intervalMin: 30, index: 0, lastChange: 0, customUrls: [], upload: '', color: PRESETS[0] };
   delete s.settings.searchEngine;
+  if (!s.settings.lang) s.settings.lang = 'auto';
   if (!Array.isArray(s.board)) {
     s.board = (s.tree || []).map(toWidget);
     delete s.tree;
@@ -361,12 +450,12 @@ function currentBgTarget() {
   return { css: list[b.index], isImage: true };
 }
 function showBg() {
-  const t = currentBgTarget();
-  paintBg(t.css, t.isImage);
+  const bg = currentBgTarget();
+  paintBg(bg.css, bg.isImage);
   const b = state.settings.bg;
   $('#credit').innerHTML = (b.mode === 'curated' || (b.mode === 'custom' && !b.customUrls.length && !b.upload))
-    ? 'Фото: <a href="https://unsplash.com" target="_blank">Unsplash</a>' : '';
-  if (t.isImage) {
+    ? `${t('photo')} <a href="https://unsplash.com" target="_blank">Unsplash</a>` : '';
+  if (bg.isImage) {
     const list = bgList();
     const nx = list[(b.index + 1) % list.length];
     if (nx) { const i = new Image(); i.src = nx; }
@@ -451,9 +540,9 @@ function buildChecklist(el, w) {
   if (!Array.isArray(w.items)) w.items = [];
   const head = document.createElement('div');
   head.className = 'w-note-head';
-  const t = document.createElement('span');
-  t.textContent = w.title || 'Список';
-  head.appendChild(t);
+  const tt = document.createElement('span');
+  tt.textContent = w.title || t('tChecklist');
+  head.appendChild(tt);
   head.appendChild(widgetMini(() => openWModal('edit', w), () => delWidget(w.id)));
   const list = document.createElement('div');
   list.className = 'w-check-list';
@@ -471,7 +560,7 @@ function buildChecklist(el, w) {
     del.className = 'del';
     del.type = 'button';
     del.textContent = '✕';
-    del.title = 'Убрать';
+    del.title = t('remove');
     del.onclick = (e) => { e.preventDefault(); w.items.splice(w.items.indexOf(item), 1); li.remove(); quietSave(); };
     li.append(cb, tx, del);
     return li;
@@ -480,12 +569,12 @@ function buildChecklist(el, w) {
   const form = document.createElement('form');
   form.className = 'w-check-add';
   const inp = document.createElement('input');
-  inp.placeholder = '+ пункт';
+  inp.placeholder = t('newItem');
   inp.maxLength = 120;
   const add = document.createElement('button');
   add.type = 'submit';
   add.textContent = '+';
-  add.title = 'Добавить';
+  add.title = t('add');
   form.onsubmit = (e) => {
     e.preventDefault();
     const v = inp.value.trim();
@@ -508,13 +597,13 @@ function widgetMini(onEdit, onDel) {
   if (onEdit) {
     const bEdit = document.createElement('button');
     bEdit.textContent = '✎';
-    bEdit.title = 'Изменить';
+    bEdit.title = t('editTip');
     bEdit.onclick = (e) => { e.stopPropagation(); onEdit(); };
     mini.append(bEdit);
   }
   const bDel = document.createElement('button');
   bDel.textContent = '✕';
-  bDel.title = 'Удалить';
+  bDel.title = t('delTip');
   bDel.onclick = (e) => { e.stopPropagation(); onDel(); };
   mini.append(bDel);
   return mini;
@@ -569,14 +658,14 @@ function widgetEl(w) {
   if (w.type === 'note') {
     const head = document.createElement('div');
     head.className = 'w-note-head';
-    const t = document.createElement('span');
-    t.textContent = w.title || 'Заметки';
-    head.appendChild(t);
+    const tt = document.createElement('span');
+    tt.textContent = w.title || t('tNote');
+    head.appendChild(tt);
     head.appendChild(widgetMini(() => openWModal('edit', w), () => delWidget(w.id)));
     const ta = document.createElement('textarea');
     ta.className = 'w-note-text';
     ta.value = w.text || '';
-    ta.placeholder = 'Пиши...';
+    ta.placeholder = t('writePh');
     ta.addEventListener('input', () => { w.text = ta.value; quietSave(); });
     ta.addEventListener('blur', () => store.save(state));
     el.append(head, ta);
@@ -602,16 +691,16 @@ function widgetEl(w) {
     if (w.showCurrent === false && !(+w.days > 0) && !(+w.hours > 0)) {
       const hint = document.createElement('div');
       hint.className = 'w-wcity';
-      hint.textContent = 'Настрой отображение (✎)';
+      hint.textContent = t('setupHint');
       el.appendChild(hint);
     }
     el.appendChild(widgetMini(() => openWModal('edit', w), () => delWidget(w.id)));
-    el.title = 'Погода: ' + (w.city || '');
+    el.title = t('tWeather') + ': ' + (w.city || '');
   } else if (w.type === 'currency') {
     const rows = document.createElement('div');
     rows.className = 'w-rows';
     el.append(rows);
-    el.title = 'Валюты';
+    el.title = t('tCurrency');
     el.appendChild(widgetMini(() => openWModal('edit', w), () => delWidget(w.id)));
   } else if (w.type === 'crypto') {
     const rows = document.createElement('div');
@@ -629,7 +718,7 @@ function widgetEl(w) {
     sh.className = 'w-shuffle';
     sh.type = 'button';
     sh.textContent = '⟳';
-    sh.title = 'Другая цитата';
+    sh.title = t('quoteAnother');
     sh.onclick = (e) => { e.stopPropagation(); w.qoff = (w.qoff || 0) + 1; paintQuote(w, q, a); quietSave(); };
     el.append(q, a, sh);
     el.appendChild(widgetMini(null, () => delWidget(w.id)));
@@ -670,7 +759,7 @@ function widgetEl(w) {
       ic.textContent = '📁';
       const nm = document.createElement('span');
       nm.className = 'mn';
-      nm.textContent = 'пусто';
+      nm.textContent = t('emptyList');
   b.append(ic, nm);
   b.addEventListener('contextmenu', (e) => {
     e.preventDefault();
@@ -688,13 +777,13 @@ function widgetEl(w) {
         const more = document.createElement('button');
         more.type = 'button';
         more.className = 'w-mini w-more';
-        more.title = 'Открыть папку';
+        more.title = t('mOpen');
         const ic = document.createElement('span');
         ic.className = 'mi';
         ic.textContent = '+' + over;
         const nm = document.createElement('span');
         nm.className = 'mn';
-        nm.textContent = 'все';
+        nm.textContent = t('all');
         more.append(ic, nm);
         more.onclick = (e) => { e.stopPropagation(); if (isEdit()) return; path = [w.id]; render(); };
         box.appendChild(more);
@@ -714,7 +803,7 @@ function widgetEl(w) {
   // ручка ресайза
   const rz = document.createElement('div');
   rz.className = 'rz';
-  rz.title = 'Размер';
+  rz.title = t('resize');
   el.appendChild(rz);
   initResize(rz, el, w);
 
@@ -736,8 +825,8 @@ function widgetEl(w) {
 function delWidget(id) {
   const w = state.board.find((x) => x.id === id);
   if (!w) return;
-  if (w.type === 'folder' && w.children.length && !confirm(`Удалить папку «${w.title}» с содержимым (${w.children.length})?`)) return;
-  if (w.type !== 'folder' && !confirm(`Удалить «${w.title || 'виджет'}»?`)) return;
+  if (w.type === 'folder' && w.children.length && !confirm(t('delFolder', w.title, w.children.length))) return;
+  if (w.type !== 'folder' && !confirm(t('delOne', w.title || t('untitled')))) return;
   state.board.splice(state.board.findIndex((x) => x.id === id), 1);
   path = path.filter((pid) => findItem(pid));
   save();
@@ -864,7 +953,7 @@ function tileEl(it) {
   const bDel = document.createElement('button');
   bDel.textContent = '✕';
   bDel.onclick = () => {
-    if (!confirm(`Удалить «${it.title}»?`)) return;
+    if (!confirm(t('delOne', it.title))) return;
     const found = findItem(it.id);
     if (!found) return;
     found.parent.children.splice(found.parent.children.findIndex((x) => x.id === it.id), 1);
@@ -876,7 +965,7 @@ function tileEl(it) {
   if (_loc && _loc.parent.children !== state.board) {
     const bTop = document.createElement('button');
     bTop.textContent = '⤴';
-    bTop.title = 'Вынести на доску';
+    bTop.title = t('toBoardTip');
     bTop.onclick = () => moveToBoard(it.id);
     mini.append(bTop);
   }
@@ -919,9 +1008,9 @@ function moveItem(dragId, targetId) {
   if (!dragId || dragId === targetId) return;
   const d = findItem(dragId), t = findItem(targetId);
   if (!d || !t) return;
-  if (d.item.type !== 'link' && d.item.type !== 'folder') return alert('Этот виджет живёт только на доске');
+  if (d.item.type !== 'link' && d.item.type !== 'folder') return alert(t('onlyBoard'));
   if (t.item.type === 'folder') {
-    if (d.item.type === 'folder' && (dragId === targetId || isDescendant(dragId, targetId))) return alert('Нельзя вложить папку в саму себя');
+    if (d.item.type === 'folder' && (dragId === targetId || isDescendant(dragId, targetId))) return alert(t('selfNest'));
     d.parent.children.splice(d.parent.children.findIndex((x) => x.id === dragId), 1);
     t.item.children.push(d.item);
   } else if (d.parent !== t.parent) {
@@ -954,7 +1043,7 @@ function moveIntoFolder(dragId, targetId) {
   if (!d || !t || t.item.type !== 'folder') return false;
   if (d.item.type !== 'link' && d.item.type !== 'folder') return false;
   if (d.item.type === 'folder' && isDescendant(dragId, targetId)) {
-    alert('Нельзя вложить папку в саму себя');
+    alert(t('selfNest'));
     save();
     return true;
   }
@@ -985,7 +1074,7 @@ async function resolveCity(city) {
   const key = city.trim().toLowerCase();
   const g = state.geo[key];
   if (g && (Date.now() - g.ts) < 30 * 864e5) return g;
-  const r = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=ru&format=json`);
+  const r = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=${lang() === 'ru' ? 'ru' : 'en'}&format=json`);
   const j = await r.json();
   if (!j.results || !j.results.length) throw new Error('no city');
   const v = { lat: j.results[0].latitude, lon: j.results[0].longitude, name: j.results[0].name, ts: Date.now() };
@@ -1007,7 +1096,7 @@ async function loadWeather(w) {
   try {
     if (!w.city || !w.city.trim()) {
       if (tEl) tEl.textContent = '—';
-      if (cEl) cEl.textContent = isEdit() ? 'Укажи город (✎)' : 'Нет города';
+      if (cEl)       if (cEl) cEl.textContent = isEdit() ? t('setCity') : t('noCity');
       return;
     }
     let mem = wxMem[w.id];
@@ -1055,7 +1144,7 @@ async function loadWeather(w) {
       for (let k = 0; k < days; k++) {
         const i = start + k;
         if (i >= j.daily.time.length) break;
-        const day = new Date(j.daily.time[i] + 'T12:00:00').toLocaleDateString('ru-RU', { weekday: 'short' });
+        const day = new Date(j.daily.time[i] + 'T12:00:00').toLocaleDateString(loc(), { weekday: 'short' });
         const row = document.createElement('div');
         row.className = 'w-row';
         const dEl = document.createElement('span');
@@ -1092,10 +1181,29 @@ const QUOTES = [
   ['Единственный способ делать великие дела — любить то, что ты делаешь.', 'С. Джобс'],
   ['Действие — ключ к успеху.', 'П. Пикассо'],
 ];
+const QUOTES_EN = [
+  ['We are what we repeatedly do. Excellence, then, is not an act, but a habit.', 'Aristotle'],
+  ['Start where you are. Use what you have.', 'A. Ashe'],
+  ['Success is going from failure to failure without losing enthusiasm.', 'W. Churchill'],
+  ['Everything you can imagine is real.', 'P. Picasso'],
+  ['The best time to plant a tree was 20 years ago. The second best time is now.', 'Proverb'],
+  ['Never put off till tomorrow what you can do today.', 'B. Franklin'],
+  ['Simplicity is prerequisite for reliability.', 'E. Dijkstra'],
+  ['First, solve the problem. Then, write the code.', 'J. Johnson'],
+  ['Knowledge is power.', 'F. Bacon'],
+  ['Less, but better.', 'Dieter Rams'],
+  ['Done is better than perfect.', 'Principle'],
+  ['The only way to do great work is to love what you do.', 'S. Jobs'],
+  ['Action is the foundational key to all success.', 'P. Picasso'],
+  ['It always seems impossible until it is done.', 'N. Mandela'],
+  ['What we think, we become.', 'Buddha'],
+  ['Well begun is half done.', 'Proverb'],
+];
 function paintQuote(w, qEl, aEl) {
-  const i = (Math.floor(Date.now() / 864e5) + (w.qoff || 0)) % QUOTES.length;
-  const q = QUOTES[(i + QUOTES.length) % QUOTES.length];
-  qEl.textContent = '«' + q[0] + '»';
+  const arr = lang() === 'ru' ? QUOTES : QUOTES_EN;
+  const i = (Math.floor(Date.now() / 864e5) + (w.qoff || 0)) % arr.length;
+  const q = arr[(i + arr.length) % arr.length];
+  qEl.textContent = lang() === 'ru' ? '«' + q[0] + '»' : '"' + q[0] + '"';
   aEl.textContent = '— ' + q[1];
 }
 
@@ -1139,9 +1247,9 @@ async function loadCurrency(w) {
       row.append(cur, sp, val);
       box.appendChild(row);
     });
-    if (!box.children.length) box.innerHTML = '<div class="w-row"><span class="d">Нет валют — настрой ✎</span></div>';
+    if (!box.children.length) box.innerHTML = `<div class="w-row"><span class="d">${t('noCurr')}</span></div>`;
   } catch {
-    box.innerHTML = '<div class="w-row"><span class="d">Нет связи</span></div>';
+    box.innerHTML = `<div class="w-row"><span class="d">${t('noConn')}</span></div>`;
   }
 }
 
@@ -1179,9 +1287,9 @@ async function loadCrypto(w) {
       row.append(cur, sp, val);
       box.appendChild(row);
     });
-    if (!box.children.length) box.innerHTML = '<div class="w-row"><span class="d">Нет данных</span></div>';
+    if (!box.children.length) box.innerHTML = `<div class="w-row"><span class="d">${t('noData')}</span></div>`;
   } catch {
-    box.innerHTML = '<div class="w-row"><span class="d">Нет связи</span></div>';
+    box.innerHTML = `<div class="w-row"><span class="d">${t('noConn')}</span></div>`;
   }
 }
 
@@ -1196,6 +1304,7 @@ setInterval(loadAllDynamic, 15 * 60e3);
 
 // ---------- рендер ----------
 function render() {
+  applyI18n();
   const s = state.settings;
   document.documentElement.dataset.theme = s.theme;
   document.body.classList.toggle('editing', isEdit());
@@ -1222,7 +1331,7 @@ function renderFolder() {
   const { list, folder } = getFolderByPath();
   if (!folder) { path = []; render(); return; }
   $('#folderTitle').textContent = folder.title;
-  $('#folderCount').textContent = list.length ? `${list.length} эл.` : 'пусто';
+  $('#folderCount').textContent = list.length ? t('itemsCount', list.length) : t('emptyList');
 
   const c = $('#folderCrumbs');
   c.innerHTML = '';
@@ -1247,7 +1356,7 @@ function renderFolder() {
       } else {
         const b = document.createElement('button');
         b.textContent = f.title;
-        b.title = 'Перейти. Сюда же можно перетащить элемент';
+        b.title = t('crumbDrop');
         b.onclick = () => { path = path.slice(0, idx + 1); render(); };
         b.ondragover = (e) => { e.preventDefault(); b.classList.add('drop-target'); };
         b.ondragleave = () => b.classList.remove('drop-target');
@@ -1278,6 +1387,7 @@ function syncSettingsForm() {
   const b = state.settings.bg;
   $('#sTheme').value = state.settings.theme;
   $('#sClock').checked = state.settings.showClock;
+  $('#sLang').value = state.settings.lang || 'auto';
   $('#sBgMode').value = b.mode;
   $('#sBgInterval').value = String(b.intervalMin);
   $('#sCustomUrls').value = (b.customUrls || []).join('\n');
@@ -1311,8 +1421,8 @@ function openWModal(mode, widget = null, preset = null, showAll = false) {
   $('#wmodal').hidden = false;
   const wtype = widget?.type || preset || 'note';
   $('#wmodalTitle').textContent = mode === 'create'
-    ? (preset === 'link' ? 'Новая ссылка' : preset === 'folder' ? 'Новая папка' : 'Новый виджет')
-    : 'Изменить';
+    ? (preset === 'link' ? t('wNewLink') : preset === 'folder' ? t('wNewFolder') : t('wNewWidget'))
+    : t('wEdit');
   [...$('#wType').options].forEach((o) => {
     if (mode !== 'create') o.hidden = o.value !== wtype;
     else if (preset) o.hidden = true;
@@ -1368,12 +1478,12 @@ async function tryAutofill() {
   titleCtl = new AbortController();
   const sig = titleCtl.signal;
   const oldPh = titleEl.placeholder;
-  titleEl.placeholder = 'Подтягиваю название…';
+  titleEl.placeholder = t('fetchingTitle');
   try {
-    const t = await fetchTitle(url, sig);
-    if (!sig.aborted && t && !manualTitle && (titleEl.value.trim() === '' || titleEl.value === autoTitle)) {
-      titleEl.value = t;
-      autoTitle = t;
+    const fetched = await fetchTitle(url, sig);
+    if (!sig.aborted && fetched && !manualTitle && (titleEl.value.trim() === '' || titleEl.value === autoTitle)) {
+      titleEl.value = fetched;
+      autoTitle = fetched;
     }
   } finally {
     if (!sig.aborted) titleEl.placeholder = oldPh;
@@ -1428,39 +1538,39 @@ function ctxDelete(item) {
   const f = findItem(item.id);
   if (!f) return;
   const n = (item.children || []).length;
-  if (item.type === 'folder' && n && !confirm(`Удалить папку «${item.title}» с содержимым (${n})?`)) return;
-  else if (item.type !== 'folder' && !confirm(`Удалить «${item.title || 'виджет'}»?`)) return;
+  if (item.type === 'folder' && n && !confirm(t('delFolder', item.title, n))) return;
+  else if (item.type !== 'folder' && !confirm(t('delOne', item.title || t('untitled')))) return;
   f.parent.children.splice(f.parent.children.findIndex((x) => x.id === item.id), 1);
   path = path.filter((pid) => findItem(pid));
   save();
 }
 function ctxItemsLink(item, nested) {
   const items = [
-    { label: 'Открыть', fn: () => window.open(item.url, '_blank') },
-    { label: 'Копировать ссылку', fn: () => copyText(item.url) },
-    { label: 'Изменить', fn: () => openWModal('edit', item) },
+    { label: t('mOpen'), fn: () => window.open(item.url, '_blank') },
+    { label: t('mCopy'), fn: () => copyText(item.url) },
+    { label: t('mEdit'), fn: () => openWModal('edit', item) },
   ];
-  if (nested) items.push({ label: 'Вынести на доску', fn: () => moveToBoard(item.id) });
-  items.push({ sep: true }, { label: 'Удалить', danger: true, fn: () => ctxDelete(item) });
+  if (nested) items.push({ label: t('mToBoard'), fn: () => moveToBoard(item.id) });
+  items.push({ sep: true }, { label: t('mDel'), danger: true, fn: () => ctxDelete(item) });
   return items;
 }
 function ctxItemsFolder(item, nested, openFn) {
   const items = [
-    { label: 'Открыть', fn: openFn },
-    { label: 'Переименовать', fn: () => openWModal('edit', item) },
+    { label: t('mOpen'), fn: openFn },
+    { label: t('mRename'), fn: () => openWModal('edit', item) },
   ];
-  if (nested) items.push({ label: 'Вынести на доску', fn: () => moveToBoard(item.id) });
-  items.push({ sep: true }, { label: 'Удалить', danger: true, fn: () => ctxDelete(item) });
+  if (nested) items.push({ label: t('mToBoard'), fn: () => moveToBoard(item.id) });
+  items.push({ sep: true }, { label: t('mDel'), danger: true, fn: () => ctxDelete(item) });
   return items;
 }
 function ctxItemsWidget(w) {
   const items = [];
-  if (w.type === 'note' || w.type === 'checklist') items.push({ label: 'Переименовать', fn: () => openWModal('edit', w) });
-  if (w.type === 'weather') items.push({ label: 'Настроить погоду', fn: () => openWModal('edit', w) });
-  if (w.type === 'currency') items.push({ label: 'Настроить валюты', fn: () => openWModal('edit', w) });
-  if (w.type === 'crypto') items.push({ label: 'Настроить монеты', fn: () => openWModal('edit', w) });
+  if (w.type === 'note' || w.type === 'checklist') items.push({ label: t('mRename'), fn: () => openWModal('edit', w) });
+  if (w.type === 'weather') items.push({ label: t('mSetupWeather'), fn: () => openWModal('edit', w) });
+  if (w.type === 'currency') items.push({ label: t('mSetupCurr'), fn: () => openWModal('edit', w) });
+  if (w.type === 'crypto') items.push({ label: t('mSetupCoins'), fn: () => openWModal('edit', w) });
   if (items.length) items.push({ sep: true });
-  items.push({ label: 'Удалить', danger: true, fn: () => ctxDelete(w) });
+  items.push({ label: t('mDel'), danger: true, fn: () => ctxDelete(w) });
   return items;
 }
 document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#ctx')) closeCtx(); }, true);
@@ -1476,7 +1586,7 @@ $('#wmodal').addEventListener('mousedown', (e) => { if (e.target.id === 'wmodal'
 $('#wmodalForm').onsubmit = (e) => {
   e.preventDefault();
   const t = $('#wType').value;
-  const title = $('#wTitle').value.trim() || 'Без названия';
+  const title = $('#wTitle').value.trim() || I18N[lang()].untitled;
   if (wEditing.mode === 'edit') {
     const w = wEditing.widget;
     if (t !== 'link') delete w.url;
@@ -1485,7 +1595,7 @@ $('#wmodalForm').onsubmit = (e) => {
     else if (t === 'folder' || t === 'note' || t === 'checklist') { w.title = title; }
     else if (t === 'weather') {
       w.city = $('#wCity').value.trim() || '';
-      w.title = 'Погода';
+      w.title = I18N[lang()].tWeather;
       w.showCurrent = $('#wCur').checked;
       w.days = Math.min(7, Math.max(0, +$('#wDays').value || 0));
       w.hours = Math.min(24, Math.max(0, +$('#wHours').value || 0));
@@ -1499,16 +1609,16 @@ $('#wmodalForm').onsubmit = (e) => {
     const r = target === state.board ? cascadeRect(t) : {};
     if (t === 'link') {
       const url = normalizeUrl($('#wUrl').value);
-      if (!url) return alert('Вставь URL');
+      if (!url) return alert(t('needUrl'));
       target.push({ id: uid(), type: 'link', title, url, ...r });
     }
     else if (t === 'folder') target.push({ id: uid(), type: 'folder', title, children: [], ...r });
     else if (t === 'note') target.push({ id: uid(), type: 'note', title, text: '', ...r });
     else if (t === 'checklist') target.push({ id: uid(), type: 'checklist', title, items: [], ...r });
-    else if (t === 'weather') target.push({ id: uid(), type: 'weather', title: 'Погода', city: $('#wCity').value.trim(), showCurrent: $('#wCur').checked, days: Math.min(7, Math.max(0, +$('#wDays').value || 0)), hours: Math.min(24, Math.max(0, +$('#wHours').value || 0)), ...r });
-    else if (t === 'currency') { const cs = [...$('#wSyms').selectedOptions].map((o) => o.value).slice(0, 6); target.push({ id: uid(), type: 'currency', title: 'Валюты', base: $('#wBase').value || 'UAH', symbols: cs.length ? cs : ['USD', 'EUR'], ...r }); }
-    else if (t === 'crypto') { const cc = parseCoins($('#wCoins').value); target.push({ id: uid(), type: 'crypto', title: 'Крипта', coins: cc.length ? cc : ['BTC', 'ETH'], ...r }); }
-    else if (t === 'quote') target.push({ id: uid(), type: 'quote', title: 'Цитата', ...r });
+    else if (t === 'weather') target.push({ id: uid(), type: 'weather', title: I18N[lang()].tWeather, city: $('#wCity').value.trim(), showCurrent: $('#wCur').checked, days: Math.min(7, Math.max(0, +$('#wDays').value || 0)), hours: Math.min(24, Math.max(0, +$('#wHours').value || 0)), ...r });
+    else if (t === 'currency') { const cs = [...$('#wSyms').selectedOptions].map((o) => o.value).slice(0, 6); target.push({ id: uid(), type: 'currency', title: I18N[lang()].tCurrency, base: $('#wBase').value || 'UAH', symbols: cs.length ? cs : ['USD', 'EUR'], ...r }); }
+    else if (t === 'crypto') { const cc = parseCoins($('#wCoins').value); target.push({ id: uid(), type: 'crypto', title: I18N[lang()].tCrypto, coins: cc.length ? cc : ['BTC', 'ETH'], ...r }); }
+    else if (t === 'quote') target.push({ id: uid(), type: 'quote', title: I18N[lang()].tQuote, ...r });
   }
   closeWModal(); save();
 };
@@ -1557,6 +1667,7 @@ $('#settingsSave').onclick = () => {
   const b = state.settings.bg;
   state.settings.theme = $('#sTheme').value;
   state.settings.showClock = $('#sClock').checked;
+  state.settings.lang = $('#sLang').value;
   b.mode = $('#sBgMode').value;
   b.intervalMin = +$('#sBgInterval').value;
   b.customUrls = $('#sCustomUrls').value.split('\n').map((s) => s.trim()).filter(Boolean);
@@ -1570,6 +1681,7 @@ $('#sBlur').oninput = (e) => { state.settings.bg.blur = +e.target.value; $('#blu
 $('#sDim').oninput = (e) => { state.settings.bg.dim = +e.target.value; $('#dimVal').textContent = e.target.value + '%'; applyFilters(); };
 $('#sBlur').onchange = $('#sDim').onchange = () => store.save(state);
 $('#sBgMode').onchange = (e) => { state.settings.bg.mode = e.target.value; syncSettingsForm(); showBg(); };
+$('#sLang').onchange = (e) => { state.settings.lang = e.target.value; store.save(state); render(); };
 
 $('#sUpload').onchange = async (e) => {
   const f = e.target.files[0];
@@ -1579,7 +1691,7 @@ $('#sUpload').onchange = async (e) => {
     state.settings.bg.upload = dataUrl;
     state.settings.bg.mode = 'upload';
     saveBg();
-  } catch { alert('Не смог прочитать файл'); }
+  } catch { alert(t('badFile')); }
   e.target.value = '';
 };
 $('#uploadClear').onclick = () => { state.settings.bg.upload = ''; saveBg(); };
@@ -1602,13 +1714,13 @@ $('#importFile').onchange = (e) => {
       if (!data.board || !data.settings) throw 0;
       state = data; path = [];
       store.save(state); scheduleBg(); showBg(); render();
-    } catch { alert('Битый файл бэкапа'); }
+    } catch { alert(t('badBackup')); }
   };
   r.readAsText(f);
   e.target.value = '';
 };
 $('#resetBtn').onclick = () => {
-  if (!confirm('Стереть все ссылки и настройки?')) return;
+  if (!confirm(t('resetConfirm'))) return;
   state = defaultState(); path = [];
   $('#settingsModal').hidden = true;
   store.save(state); scheduleBg(); showBg(); render();
@@ -1616,8 +1728,9 @@ $('#resetBtn').onclick = () => {
 
 function tick() {
   const now = new Date();
-  $('#clock').textContent = now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-  $('#date').textContent = now.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
+  const lc = loc();
+  $('#clock').textContent = now.toLocaleTimeString(lc, { hour: '2-digit', minute: '2-digit' });
+  $('#date').textContent = now.toLocaleDateString(lc, { weekday: 'long', day: 'numeric', month: 'long' });
 }
 setInterval(tick, 5000);
 tick();
@@ -1635,17 +1748,17 @@ window.addEventListener('resize', () => {
 $('#grid').addEventListener('contextmenu', (e) => {
   e.preventDefault();
   openCtx(e.clientX, e.clientY, [
-    { label: 'Создать ссылку', fn: () => openWModal('create', null, 'link') },
-    { label: 'Создать папку', fn: () => openWModal('create', null, 'folder') },
-    { label: 'Создать виджет', fn: () => openWModal('create') },
+    { label: t('mAddLink'), fn: () => openWModal('create', null, 'link') },
+    { label: t('mAddFolder'), fn: () => openWModal('create', null, 'folder') },
+    { label: t('mAddWidget'), fn: () => openWModal('create') },
   ]);
 });
 $('#folderGrid').addEventListener('contextmenu', (e) => {
   e.preventDefault();
   openCtx(e.clientX, e.clientY, [
-    { label: 'Создать ссылку', fn: () => openWModal('create', null, 'link') },
-    { label: 'Создать папку', fn: () => openWModal('create', null, 'folder') },
-    { label: 'Создать виджет', fn: () => openWModal('create', null, null, true) },
+    { label: t('mAddLink'), fn: () => openWModal('create', null, 'link') },
+    { label: t('mAddFolder'), fn: () => openWModal('create', null, 'folder') },
+    { label: t('mAddWidget'), fn: () => openWModal('create', null, null, true) },
   ]);
 });
 store.load().then((s) => { state = s; scheduleBg(); showBg(); render(); setTimeout(() => document.body.classList.remove('boot'), 1000); });

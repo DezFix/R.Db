@@ -61,7 +61,7 @@ body.editing #editToggle{background:#fff;color:#111}
 /* окно папки поверх стола */
 .folder-overlay{background:rgba(0,0,0,.45);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
 body.dragging .folder-overlay{cursor:copy}
-body.dragging .folder-overlay::after{content:'Отпусти за окном — вынести на доску';position:fixed;bottom:76px;left:50%;transform:translateX(-50%);
+body.dragging .folder-overlay::after{content:attr(data-draghint);position:fixed;bottom:76px;left:50%;transform:translateX(-50%);
   background:rgba(255,255,255,.16);border:1px dashed rgba(255,255,255,.6);color:#fff;font-size:13px;
   padding:9px 18px;border-radius:999px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);pointer-events:none;white-space:nowrap;z-index:11}
 .sheet{width:min(580px,94vw);max-height:82vh;overflow:auto;background:var(--glass);color:var(--text);
@@ -139,6 +139,8 @@ body.dragging .folder-overlay::after{content:'Отпусти за окном —
 .drawer-body h4:first-child{border-top:0;padding-top:0;margin-top:0}
 .drawer-foot{margin-top:14px}
 .drawer-foot .btn-primary{width:100%}
+.about{font-size:13px;color:var(--muted);margin:0}
+.drawer-body a.btn-ghost{display:block;text-align:center;text-decoration:none}
 /* секции настроек боксами */
 .set-box{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:12px}
 [data-theme="light"] .set-box{background:rgba(0,0,0,.04);border-color:rgba(0,0,0,.08)}
