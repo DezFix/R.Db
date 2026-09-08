@@ -445,7 +445,9 @@ const ICON_ALIASES = {
 };
 const ICON_CUSTOM = {
   'community-scripts.github.io': 'https://cdn.jsdelivr.net/gh/loganmarchione/homelab-svg-assets/assets/proxmox.svg',
+  'community-scripts.org': 'https://cdn.jsdelivr.net/gh/loganmarchione/homelab-svg-assets/assets/proxmox.svg',
 };
+const ICON_STOPLIST = new Set(['com', 'org', 'net', 'io', 'ru', 'su', 'by', 'ua', 'kz', 'dev', 'app', 'me', 'info', 'online', 'site', 'web', 'cloud', 'ai', 'tech', 'pro', 'media', 'local', 'lan', 'home', 'internal', 'corp', 'biz', 'tv', 'cc', 'co', 'name', 'page', 'top', 'xyz']);
 function iconCandidates(link) {
   const title = link.title, url = link.url;
   const out = [];
@@ -461,14 +463,26 @@ function iconCandidates(link) {
       out.push(`https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/${base}.png`);
     }
   };
-  if (title) push(norm(title));
+    const pushExtra = (n) => {
+      if (!n || seen.has('x:' + n)) return;
+      seen.add('x:' + n);
+      out.push(`https://cdn.jsdelivr.net/gh/selfhst/icons/svg/${n}.svg`);
+      out.push(`https://cdn.jsdelivr.net/gh/selfhst/icons/png/${n}.png`);
+      out.push(`https://cdn.jsdelivr.net/npm/simple-icons/icons/${n}.svg`);
+    };
+    const eat = (n) => { if (n) { push(n); pushExtra(n); } };
+    if (title) eat(norm(title));
   let host = '', origin = '', isLocal = false;
   try {
     const u = new URL(url);
     host = u.hostname;
     origin = u.origin;
     isLocal = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[::1\]|\[fe80)/i.test(host) || !host.includes('.') || /^[0-9a-fA-F:.]+$/.test(host);
-    host.split('.').forEach((p) => { if (p && p !== 'www') push(norm(p)); });
+    host.toLowerCase().split('.').forEach((p) => {
+      const n = norm(p);
+      if (!p || p === 'www' || ICON_STOPLIST.has(n)) return;
+      eat(n);
+    });
   } catch {}
   try {
     const h = new URL(url).hostname.toLowerCase();

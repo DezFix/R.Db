@@ -45,7 +45,7 @@ python -m http.server
 ## Атрибуция
 
 - Иконки интерфейса: [Papirus Icon Theme](https://github.com/PapirusDevelopmentTeam/papirus-icon-theme) (GPL-3.0), лежат в `assets/icons/`
-- Фоны: Unsplash; иконки приложений: dashboard-icons
+- Фоны: Unsplash; иконки приложений: [dashboard-icons](https://github.com/walkxcode/dashboard-icons), [selfhst/icons](https://github.com/selfhst/icons), [Simple Icons](https://github.com/simple-icons/simple-icons)
 
 ## Лицензия
 
