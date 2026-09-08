@@ -655,6 +655,28 @@ function uiIcon(name, alt = '') {
   img.draggable = false;
   return img;
 }
+function paintSyms(selected) {
+  const box = $('#wSymsBox');
+  box.innerHTML = '';
+  CURRENCIES.forEach((c) => {
+    const row = document.createElement('div');
+    row.className = 'check curr-opt';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = c;
+    cb.checked = selected.includes(c);
+    const sym = document.createElement('b');
+    sym.textContent = CUR_SYM[c] || '';
+    const code = document.createElement('span');
+    code.textContent = c;
+    row.append(cb, sym, code);
+    row.onclick = (e) => { if (e.target !== cb) cb.checked = !cb.checked; };
+    box.appendChild(row);
+  });
+}
+function getSyms() {
+  return [...document.querySelectorAll('#wSymsBox input:checked')].map((i) => i.value).slice(0, 6);
+}
 function widgetMini(onEdit, onDel) {
   const mini = document.createElement('div');
   mini.className = 'mini';
@@ -1273,6 +1295,7 @@ function paintQuote(w, qEl, aEl) {
 
 const fxMem = {};
 const CUR_SYM = { USD: '$', EUR: '€', UAH: '₴', GBP: '£', PLN: 'zł', JPY: '¥', CNY: '¥', CHF: 'Fr', CZK: 'Kč', SEK: 'kr', CAD: '$', AUD: '$' };
+const CURRENCIES = ['USD', 'EUR', 'UAH', 'GBP', 'PLN', 'CHF', 'JPY', 'CNY', 'CZK', 'SEK', 'CAD', 'AUD'];
 const crMem = { t: 0, key: '', data: null };
 const COIN_IDS = { BTC: 'bitcoin', ETH: 'ethereum', SOL: 'solana', DOGE: 'dogecoin', XRP: 'ripple', ADA: 'cardano', TON: 'the-open-network', BNB: 'binancecoin', LTC: 'litecoin', TRX: 'tron', AVAX: 'avalanche-2', LINK: 'chainlink', DOT: 'polkadot', USDT: 'tether' };
 function parseCoins(s) {
@@ -1503,7 +1526,7 @@ function openWModal(mode, widget = null, preset = null, showAll = false) {
   $('#wDays').value = widget?.days ?? 3;
   $('#wHours').value = widget?.hours ?? 0;
   $('#wBase').value = widget?.base || 'UAH';
-  [...$('#wSyms').options].forEach((o) => { o.selected = (widget?.symbols || ['USD', 'EUR']).includes(o.value); });
+  paintSyms(widget?.symbols || ['USD', 'EUR']);
   $('#wCoins').value = (widget?.coins || ['BTC', 'ETH']).join(', ');
   syncWForm();
   ($('#wCityWrap').style.display !== 'none' ? $('#wCity') : $('#wBaseWrap').style.display !== 'none' ? $('#wBase') : $('#wTitleWrap').style.display !== 'none' ? $('#wTitle') : $('#wType')).focus();
@@ -1701,7 +1724,7 @@ $('#wmodalForm').onsubmit = (e) => {
       w.hours = Math.min(24, Math.max(0, +$('#wHours').value || 0));
       delete wxMem[w.id];
     }
-    else if (t === 'currency') { w.base = $('#wBase').value || 'UAH'; const ps = [...$('#wSyms').selectedOptions].map((o) => o.value).slice(0, 6); w.symbols = ps.length ? ps : ['USD', 'EUR']; }
+    else if (t === 'currency') { w.base = $('#wBase').value || 'UAH'; const ps = getSyms(); w.symbols = ps.length ? ps : ['USD', 'EUR']; }
     else if (t === 'crypto') { const cc = parseCoins($('#wCoins').value); w.coins = cc.length ? cc : ['BTC', 'ETH']; }
   } else {
     const { list } = getFolderByPath();
@@ -1716,7 +1739,7 @@ $('#wmodalForm').onsubmit = (e) => {
     else if (t === 'note') target.push({ id: uid(), type: 'note', title, text: '', ...r });
     else if (t === 'checklist') target.push({ id: uid(), type: 'checklist', title, items: [], ...r });
     else if (t === 'weather') target.push({ id: uid(), type: 'weather', title: I18N[lang()].tWeather, city: $('#wCity').value.trim(), showCurrent: $('#wCur').checked, days: Math.min(7, Math.max(0, +$('#wDays').value || 0)), hours: Math.min(24, Math.max(0, +$('#wHours').value || 0)), ...r });
-    else if (t === 'currency') { const cs = [...$('#wSyms').selectedOptions].map((o) => o.value).slice(0, 6); target.push({ id: uid(), type: 'currency', title: I18N[lang()].tCurrency, base: $('#wBase').value || 'UAH', symbols: cs.length ? cs : ['USD', 'EUR'], ...r }); }
+    else if (t === 'currency') { const cs = getSyms(); target.push({ id: uid(), type: 'currency', title: I18N[lang()].tCurrency, base: $('#wBase').value || 'UAH', symbols: cs.length ? cs : ['USD', 'EUR'], ...r }); }
     else if (t === 'crypto') { const cc = parseCoins($('#wCoins').value); target.push({ id: uid(), type: 'crypto', title: I18N[lang()].tCrypto, coins: cc.length ? cc : ['BTC', 'ETH'], ...r }); }
     else if (t === 'quote') target.push({ id: uid(), type: 'quote', title: I18N[lang()].tQuote, ...r });
   }
