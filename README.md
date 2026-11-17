@@ -1,52 +1,100 @@
-# R.Db — рабочий стол новой вкладки
+# R.Db — homelab desk for your new tab
 
 ![R.Db](assets/shot1.png)
 
-Минималистичный дашборд в духе Bonjourr и Homarr: папки в стиле OnePlus, свободно расставляемые виджеты, свои фоны. Всё хранится локально в браузере, сервер и аккаунт не нужны.
+| Widgets | Adding a bookmark |
+|---|---|
+| ![Widgets](assets/shot-widgets.png) | ![Add bookmark](assets/shot-add.png) |
 
-## Возможности
+A minimal dashboard in the spirit of Homepage, Homarr and Dashy — but as a browser extension.
+No Docker, no server, no account: everything lives in your browser.
 
-- **Папки OnePlus** — ссылки прямо внутри виджета, остаток сжимается в кнопку `+N`; вложенность без ограничений
-- **9 виджетов**: ссылка, папка, заметка, чек-лист, погода-конструктор (текущая + часы + дни), курсы валют, крипта, цитата дня
-- **Свободная доска** — drag & drop и ресайз без налезания друг на друга, всё в пределах одного экрана без прокрутки
-- **Фоны как в Bonjourr** — карусель Unsplash, свои картинки/файлы, блюр и затемнение
-- **Автоиконки как в Heimdall** — узнал `proxmox`/`pihole`/`jellyfin` → подтянул фирменную иконку
-- **Автоназвания ссылок** — вставил URL, `<title>` подтянулся сам
-- **RU/EN** с автоопределением языка браузера, тёмная/светлая темы
-- **Firefox Sync**: настройки и виджеты тянутся между устройствами (лимит синка ~100 КБ — фото-фон лучше держать ссылкой, а не файлом)
-- Правая кнопка везде: контекстные меню и быстрое создание
+## What it does
 
-## Установка как расширения
+- **Bookmark groups** in a packed grid. Each group can be shown as tiles, a list with descriptions (Homepage-style) or compact rows. Group width: 1–3 columns or full width.
+- **Icons and titles by themselves.** Paste `http://192.168.1.10:8096` and you get *Jellyfin* with its logo. Matching uses the title, the hostname (`pve.lan`, `sonarr.home.example.com`) and default ports (8006 → Proxmox, 8123 → Home Assistant, 2283 → Immich…). An offline index covers ~4,300 self-hosted and popular services ([dashboard-icons](https://github.com/homarr-labs/dashboard-icons) + [selfhst/icons](https://github.com/selfhst/icons)). Public sites also get a title and description through microlink; anything else falls back to the site's favicon, then to a colored letter.
+- **Adding bookmarks takes one step:**
+  - the extension button → adds the current tab (title and group are editable);
+  - right-click on any page or link → *Add to R.Db desk*;
+  - `Ctrl+V` a link on the desk (it goes into the group under your cursor);
+  - drag a link from the address bar or another page onto a group;
+  - import a whole folder from browser bookmarks.
+- **12 widgets:**
+  - weather with hourly and daily forecast (Open-Meteo);
+  - exchange rates with daily change, crypto (CoinGecko);
+  - world clock (`Home=Europe/Kyiv` for custom labels), calendar, countdown to dates;
+  - RSS/Atom feed — access is asked only for that one site;
+  - embedded page (Grafana panel, Uptime Kuma status page, anything that allows framing);
+  - GitHub releases — latest versions of the apps you self-host, fresh ones highlighted;
+  - most visited sites (right-click one to pin it to a group);
+  - notes and to-do lists.
+- **Search:** type anywhere, or press `/`. It searches your bookmarks first, then the web (Google, DuckDuckGo, Bing, Yandex, Brave, Startpage, Perplexity or your own URL).
+- **Drag & drop** for links and groups, a right-click menu everywhere, undo after delete, layout lock.
+- **Look:** Unsplash photos, your own image links or file, colors and gradients; blur, dimming, accent color, density, page width, column count.
+- **Sync** via your browser account (Chrome Sync / Firefox Sync), JSON export/import, RU/EN.
+- **Upgrade from R.Db 1.x** is automatic: folders become groups, loose links go into *Bookmarks*, and widgets carry over.
 
-**Firefox:** `about:debugging` → This Firefox → Load Temporary Add-on → выбрать `manifest.json`.
-(Временно — слетает после рестарта; навсегда — подпись на addons.mozilla.org, бесплатно.)
+## Install
 
-**Chrome:** `chrome://extensions` → Developer mode → Load unpacked → папка проекта.
-(Для Web Store нужна публикация — $5 разово.)
+**Chrome / Edge / Brave:** `chrome://extensions` → Developer mode → *Load unpacked* → the project folder.
 
-## Разработка
+**Firefox (121+):** `about:debugging` → This Firefox → *Load Temporary Add-on* → `release/firefox/manifest.json` (or the `.xpi`).
+A temporary add-on is removed on restart. For a permanent install, upload `release/rdb-<version>-firefox.zip` to
+[addons.mozilla.org](https://addons.mozilla.org/developers/) — choose *On your own* to get a signed `.xpi` for yourself without a public listing (free).
 
-Никакой сборки — чистые HTML/CSS/JS. Локальный запуск:
+### Building a release
 
 ```bash
-cd R.Db
-python -m http.server
+python tools/build-release.py
 ```
 
-Структура: `index.html` — разметка, `style.css` — стекло и анимации, `app.js` — всё остальное,
-`manifest.json` — обёртка расширения, `icons/` — иконки.
+It writes `release/firefox/` and `release/chrome/` (each with its own manifest: Firefox uses a background script,
+Chrome a service worker) plus ready-to-upload zips. The `release/` folder is git-ignored.
 
-## Приватность
+## Permissions
 
-Данные (ссылки, заметки, настройки) лежат только в `localStorage`/`storage.sync` твоего браузера.
-Сеть используется лишь для: фонов Unsplash, иконок, погоды (Open-Meteo), валют (open.er-api.com),
-крипты (CoinGecko) и названий ссылок (microlink/noembed). Аккаунтов и телеметрии нет.
+| Permission | Why |
+|---|---|
+| `storage` | your desk and settings |
+| `activeTab` | the toolbar button reads the current tab's title and URL, only when you click it |
+| `contextMenus` | *Add to R.Db desk* in the right-click menu |
+| `bookmarks` (optional) | asked only when you press *From browser bookmarks* |
+| `topSites` (optional) | asked only when you add the *Most visited* widget |
+| any site (optional) | asked per site, only for an RSS feed you add |
+| open-meteo, er-api, coingecko, microlink, api.github.com | weather, rates, crypto, page titles, releases |
 
-## Атрибуция
+There are no status/ping checks on purpose, so the extension never needs access to all sites.
 
-- Иконки интерфейса: [Papirus Icon Theme](https://github.com/PapirusDevelopmentTeam/papirus-icon-theme) (GPL-3.0), лежат в `assets/icons/`
-- Фоны: Unsplash; иконки приложений: [dashboard-icons](https://github.com/walkxcode/dashboard-icons), [selfhst/icons](https://github.com/selfhst/icons), [Simple Icons](https://github.com/simple-icons/simple-icons)
+## Files
 
-## Лицензия
+```
+index.html, style.css, app.js   new tab page
+core.js                         data model, storage + sync, migration, icon/title matching, RU/EN strings
+icons-index.js                  offline icon list (regenerate: python tools/build-icon-index.py)
+popup.*                         toolbar button
+bg.js                           context menu (service worker in Chrome, background script in Firefox)
+tools/build-release.py          release packages for Firefox and Chrome
+```
 
-GPL-3.0 — см. файл [LICENSE](LICENSE).
+No build step — plain HTML/CSS/JS.
+
+## Notes
+
+- Sync quota is ~100 KB. A large desk, or icons uploaded as files, can exceed it: the desk then stays local only. Use links instead of files and you'll be fine. A background image uploaded as a file is never synced.
+- Weather, rates and icons are cached locally, so a new tab doesn't hit the network every time.
+
+## Privacy
+
+Your links, notes and settings stay in your browser's storage. The network is used only for backgrounds, icons, weather, rates, crypto, page titles (microlink, public URLs only), GitHub releases and the RSS feeds you add. No accounts, no telemetry.
+
+## Attribution
+
+Service icons: [homarr-labs/dashboard-icons](https://github.com/homarr-labs/dashboard-icons) (Apache-2.0), [selfhst/icons](https://github.com/selfhst/icons) (CC BY 4.0). Photos: Unsplash.
+
+## Support
+
+If you like the project — [☕ Ko-fi](https://ko-fi.com/dezfix).
+
+## License
+
+GPL-3.0 — see [LICENSE](LICENSE).

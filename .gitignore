@@ -2,3 +2,6 @@
 bonjourr-import.json
 *-import.json
 desktop-backup.json
+
+# сборка релиза
+release/

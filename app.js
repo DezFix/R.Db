@@ -1,2020 +1,1379 @@
-// v4: дашборд — одна доска виджетов, сетка 12 колонок (ссылки, папки, заметки, погода)
-const LS_KEY = 'browser-desktop-v1';
-const $ = (s) => document.querySelector(s);
+// R.Db — новая вкладка. Группы закладок и виджеты в сетке, поиск, быстрые добавления.
+'use strict';
+const R = window.RDB;
+const { t, uid, clamp, store, ext } = R;
+const $ = (s, el = document) => el.querySelector(s);
 
-// Подборка в духе Bonjourr/Unsplash (прямые CDN-ссылки, без API-ключа)
-const CURATED = [
-  'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?q=80&w=1920&auto=format&fit=crop',
-  'https://images.unsplash.com/photo-1469474968028-56623f02e42e?q=80&w=1920&auto=format&fit=crop',
-  'https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?q=80&w=1920&auto=format&fit=crop',
-  'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=1920&auto=format&fit=crop',
-  'https://images.unsplash.com/photo-1519681393784-d120267933ba?q=80&w=1920&auto=format&fit=crop',
-  'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?q=80&w=1920&auto=format&fit=crop',
-  'https://images.unsplash.com/photo-1501785888041-af3ef285b470?q=80&w=1920&auto=format&fit=crop',
-  'https://images.unsplash.com/photo-1518837695005-2083093ee35b?q=80&w=1920&auto=format&fit=crop',
-  'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?q=80&w=1920&auto=format&fit=crop',
-  'https://images.unsplash.com/photo-1493246507139-91e8fad9978e?q=80&w=1920&auto=format&fit=crop',
-];
-const PRESETS = [
-  'linear-gradient(135deg,#1a1a2e,#16213e,#0f3460)',
-  'linear-gradient(135deg,#2b1055,#7597de)',
-  'linear-gradient(135deg,#134e5e,#71b280)',
-  '#14141c', '#0d1117', '#e8e4da',
-];
-const DEF_RECT = { link: { fw: 0.15, fh: 0.30 }, folder: { fw: 0.15, fh: 0.30 }, note: { fw: 0.34, fh: 0.42 }, checklist: { fw: 0.34, fh: 0.50 }, weather: { fw: 0.26, fh: 0.34 }, currency: { fw: 0.24, fh: 0.28 }, crypto: { fw: 0.26, fh: 0.30 }, quote: { fw: 0.34, fh: 0.24 } };
-const MIN_PX = { link: [96, 104], folder: [96, 110], note: [170, 120], checklist: [180, 150], weather: [160, 120], currency: [150, 110], crypto: [160, 110], quote: [200, 100] };
-const VROWS = 8; // виртуальных строк для пересчёта старой сетки в свободные координаты
-const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
-const SNAP = 12; // шаг магнита сетки в px: тянешь — углы сами ровняются
-function fracOverlap(a, b) {
-  return a.fx < b.fx + b.fw && a.fx + a.fw > b.fx && a.fy < b.fy + b.fh && a.fy + a.fh > b.fy;
-}
-function pxOverlap(a, b) {
-  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-}
-function boardRects(exceptId) {
-  const zr = $('#grid').getBoundingClientRect();
-  return state.board
-    .filter((o) => o.id !== exceptId && typeof o.fx === 'number')
-    .map((o) => ({ x: o.fx * zr.width, y: o.fy * zr.height, w: o.fw * zr.width, h: o.fh * zr.height }));
-}
-function hitsAny(r, exceptId) {
-  return boardRects(exceptId).some((o) => pxOverlap(r, o));
-}
-// первое свободное место под размер (долями), иначе левый верх
-function findFreeSpot(fw, fh) {
-  for (let y = 0.02; y + fh <= 1.001; y += 0.03) {
-    for (let x = 0.02; x + fw <= 1.001; x += 0.03) {
-      const c = { fx: x, fy: y, fw, fh };
-      if (!state.board.some((o) => typeof o.fx === 'number' && fracOverlap(c, o))) return { fx: x, fy: y };
-    }
+let state = null;
+let cols = 3;
+const busyMeta = new Set(); // ссылки, для которых сейчас тянем название
+
+// ---------- мелочи ----------
+function h(tag, props, ...kids) {
+  const el = document.createElement(tag);
+  if (props) for (const [k, v] of Object.entries(props)) {
+    if (v == null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k === 'text') el.textContent = v;
+    else if (k === 'html') el.innerHTML = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+    else if (k in el && k !== 'list' && k !== 'form') el[k] = v;
+    else el.setAttribute(k, v === true ? '' : v);
   }
-  return { fx: 0.02, fy: 0.02 };
+  for (const c of kids.flat()) if (c != null && c !== false) el.append(c.nodeType ? c : document.createTextNode(c));
+  return el;
 }
-function cascadeRect(t) {
-  const d = DEF_RECT[t] || DEF_RECT.link;
-  const k = (state.board.length % 6) * 0.05;
-  const c = { fx: Math.min(k, 1 - d.fw), fy: Math.min(k, 1 - d.fh), fw: d.fw, fh: d.fh };
-  if (!state.board.some((o) => typeof o.fx === 'number' && fracOverlap(c, o))) return c;
-  const s = findFreeSpot(d.fw, d.fh);
-  return { ...c, ...s };
-}
-function placeOnBoard(item) {
-  if (item.fx === undefined) Object.assign(item, cascadeRect(item.type));
-}
-
-const I18N = {
-ru: {
-  newTab: 'Новая вкладка', addBtn: '+ Добавить', emptyBoard: 'Пусто — включи ✎ и добавь первое',
-  folderEmpty: 'Пусто — нажми + сверху, чтобы добавить', nextBg: 'Следующий фон', editMode: 'Редактировать',
-  settings: 'Настройки', photo: 'Фото:', folderAdd: 'Добавить закладку', itemsCount: '{0} эл.', emptyList: 'пусто',
-  wNew: 'Новое', wEdit: 'Изменить', wNewLink: 'Новая ссылка', wNewFolder: 'Новая папка', wNewWidget: 'Новый виджет',
-  wType: 'Тип', tLink: 'Ссылка', tFolder: 'Папка', tNote: 'Заметка', tChecklist: 'Чек-лист', tWeather: 'Погода',
-  tCurrency: 'Курсы валют', tCrypto: 'Крипта', tQuote: 'Цитата дня',
-  fTitle: 'Название', fUrl: 'URL', fCity: 'Город', fCur: 'Текущая погода', fDays: 'Дней (0–7)', fHours: 'Часов (0–24, шаг 3)',
-  fBase: 'Базовая валюта', fSyms: 'Валюты', fCoins: 'Монеты через запятую',
-  fIconAuto: 'Подтягивать иконку автоматически', fIcon: 'Своя иконка (URL)', fIconPh: 'https://… — пусто = авто',
-  fFont: 'Размер текста', fontS: 'Мелкий', fontM: 'Средний', fontL: 'Крупный',
-  save: 'Сохранить', cancel: 'Отмена', sTitle: 'Настройки', sBg: 'Фон', sSrc: 'Источник',
-  sCurated: 'Карусель (подборка)', sCustom: 'Свои картинки (ссылки)', sUpload: 'Своя картинка (файл)',
-  sGradient: 'Градиент', sColor: 'Цвет', sNextBg: 'Следующий фон', sShuffle: 'Случайный', sChange: 'Смена фона',
-  int0: 'При каждом открытии', int1: 'Каждую минуту', int5: 'Каждые 5 минут', int15: 'Каждые 15 минут',
-  int30: 'Каждые 30 минут', int1440: 'Раз в день',
-  sCustomUrls: 'Свои URL (по одному на строку)', sUploadFile: 'Файл с компьютера', sUploadClear: 'Убрать файл',
-  sColorVal: 'Цвет / градиент CSS', sBlur: 'Блюр:', sDim: 'Затемнение:', sLook: 'Оформление',
-  sTheme: 'Тема текста', sThemeDark: 'Белая (для фото)', sThemeLight: 'Тёмная (для светлого)', sClock: 'Показывать часы',
-  sLang: 'Язык', sLangAuto: 'Авто (язык браузера)', sData: 'Данные', sAbout: 'О приложении',
-  resetBtn: 'Сброс', done: 'Готово',
-  mOpen: 'Открыть', mCopy: 'Копировать ссылку', mEdit: 'Изменить', mRename: 'Переименовать',
-  mToBoard: 'Вынести на доску', mDel: 'Удалить', mAddLink: 'Создать ссылку', mAddFolder: 'Создать папку',
-  mAddWidget: 'Создать виджет', mEditCity: 'Изменить город', mSetupWeather: 'Настроить погоду',
-  mSetupCurr: 'Настроить валюты', mSetupCoins: 'Настроить монеты',
-  needUrl: 'Вставь URL', delOne: 'Удалить «{0}»?', delFolder: 'Удалить папку «{0}» с содержимым ({1})?',
-  selfNest: 'Нельзя вложить папку в саму себя', onlyBoard: 'Этот виджет живёт только на доске',
-  badBackup: 'Битый файл бэкапа', resetConfirm: 'Стереть все ссылки и настройки?', badFile: 'Не смог прочитать файл',
-  noCity: 'Нет города', setCity: 'Укажи город (✎)', noConn: 'Нет связи', noData: 'Нет данных',
-  noCurr: 'Нет валют — настрой ✎', untitled: 'Без названия', all: 'все', add: 'Добавить', newItem: '+ пункт',
-  writePh: 'Пиши...', remove: 'Убрать', resize: 'Размер', editTip: 'Изменить', delTip: 'Удалить',
-  toBoardTip: 'Вынести на доску',
-  dragHint: 'Отпусти за окном — вынести на доску', crumbDrop: 'Перейти. Сюда же можно перетащить элемент',   setupHint: 'Настрой отображение (✎)', quoteAnother: 'Другая цитата', fetchingTitle: 'Подтягиваю название…',
-  aboutText: 'Локальный рабочий стол новой вкладки. Всё хранится в твоём браузере.', kofi: '☕ Поддержать на Ko-fi',
-  donateTitle: 'Поддержать', donateText: 'Если нравится проект — поддержите разработку',
-},
-en: {
-  newTab: 'New Tab', addBtn: '+ Add', emptyBoard: 'Empty — enable ✎ and add your first',
-  folderEmpty: 'Empty — press + above to add', nextBg: 'Next background', editMode: 'Edit',
-  settings: 'Settings', photo: 'Photo:', folderAdd: 'Add bookmark', itemsCount: '{0} items', emptyList: 'empty',
-  wNew: 'New', wEdit: 'Edit', wNewLink: 'New link', wNewFolder: 'New folder', wNewWidget: 'New widget',
-  wType: 'Type', tLink: 'Link', tFolder: 'Folder', tNote: 'Note', tChecklist: 'Checklist', tWeather: 'Weather',
-  tCurrency: 'Currency', tCrypto: 'Crypto', tQuote: 'Quote of the day',
-  fTitle: 'Name', fUrl: 'URL', fCity: 'City', fCur: 'Current weather', fDays: 'Days (0–7)', fHours: 'Hours (0–24, step 3)',
-  fBase: 'Base currency', fSyms: 'Currencies', fCoins: 'Coins, comma separated',
-  fIconAuto: 'Auto-fetch icon', fIcon: 'Custom icon (URL)', fIconPh: 'https://… — empty = auto',
-  fFont: 'Text size', fontS: 'Small', fontM: 'Medium', fontL: 'Large',
-  save: 'Save', cancel: 'Cancel', sTitle: 'Settings', sBg: 'Background', sSrc: 'Source',
-  sCurated: 'Carousel (curated)', sCustom: 'Own images (links)', sUpload: 'Own image (file)',
-  sGradient: 'Gradient', sColor: 'Color', sNextBg: 'Next background', sShuffle: 'Random', sChange: 'Rotate every',
-  int0: 'On every open', int1: 'Every minute', int5: 'Every 5 minutes', int15: 'Every 15 minutes',
-  int30: 'Every 30 minutes', int1440: 'Once a day',
-  sCustomUrls: 'Own URLs (one per line)', sUploadFile: 'File from computer', sUploadClear: 'Remove file',
-  sColorVal: 'Color / CSS gradient', sBlur: 'Blur:', sDim: 'Dim:', sLook: 'Appearance',
-  sTheme: 'Text theme', sThemeDark: 'White (for photos)', sThemeLight: 'Dark (for light)', sClock: 'Show clock',
-  sLang: 'Language', sLangAuto: 'Auto (browser language)', sData: 'Data', sAbout: 'About',
-  resetBtn: 'Reset', done: 'Done',
-  mOpen: 'Open', mCopy: 'Copy link', mEdit: 'Edit', mRename: 'Rename',
-  mToBoard: 'Move to board', mDel: 'Delete', mAddLink: 'Create link', mAddFolder: 'Create folder',
-  mAddWidget: 'Create widget', mEditCity: 'Change city', mSetupWeather: 'Configure weather',
-  mSetupCurr: 'Configure currencies', mSetupCoins: 'Configure coins',
-  needUrl: 'Paste a URL', delOne: 'Delete “{0}”?', delFolder: 'Delete folder “{0}” with {1} items?',
-  selfNest: 'Cannot nest a folder into itself', onlyBoard: 'This widget lives on the board only',
-  badBackup: 'Broken backup file', resetConfirm: 'Erase all links and settings?', badFile: 'Could not read file',
-  noCity: 'No city', setCity: 'Set a city (✎)', noConn: 'Offline', noData: 'No data',
-  noCurr: 'No currencies — configure (✎)', untitled: 'Untitled', all: 'all', add: 'Add', newItem: '+ item',
-  writePh: 'Write...', remove: 'Remove', resize: 'Resize', editTip: 'Edit', delTip: 'Delete',
-  toBoardTip: 'Move to board',
-  dragHint: 'Drop outside the window — move to board', crumbDrop: 'Go. You can also drop an item here',   setupHint: 'Configure display (✎)', quoteAnother: 'Another quote', fetchingTitle: 'Fetching title…',
-  aboutText: 'Local new-tab desktop. Everything stays in your browser.', kofi: '☕ Support on Ko-fi',
-  donateTitle: 'Support', donateText: 'If you like the project — support development',
-},
+const ICON = {
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  dots: '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  trash: '<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+  group: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  widget: '<path d="M4 15a5 5 0 0 1 4.5-5A6 6 0 0 1 20 12a4 4 0 0 1-1 7.9H8a4 4 0 0 1-4-4.9z"/>',
+  copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>',
+  ext: '<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  move: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  chev: '<path d="m6 9 6 6 6-6"/>',
+  up: '<path d="m18 15-6-6-6 6"/>',
+  left: '<path d="m15 18-6-6 6-6"/>',
+  right: '<path d="m9 18 6-6-6-6"/>',
+  down: '<path d="m6 9 6 6 6-6"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/>',
+  tiles: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  compact: '<path d="M3 6h7M14 6h7M3 12h7M14 12h7M3 18h7M14 18h7"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  cal: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/>',
+  timer: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M10 2h4"/>',
+  rss: '<path d="M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/>',
+  frame: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/>',
+  tag: '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1"/>',
+  star: '<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/>',
+  note: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>',
+  coin: '<circle cx="12" cy="12" r="9"/><path d="M14.5 9.5c-.5-1-1.5-1.5-2.5-1.5-1.5 0-2.5.8-2.5 2s1 1.7 2.5 2 2.5.8 2.5 2-1 2-2.5 2c-1 0-2-.5-2.5-1.5M12 6v2M12 16v2"/>',
+  cash: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/>',
 };
-function lang() {
-  const l = state.settings.lang || 'auto';
-  if (l === 'ru' || l === 'en') return l;
-  return (navigator.language || 'en').toLowerCase().startsWith('ru') ? 'ru' : 'en';
-}
-function t(key, ...a) {
-  const d = (I18N[lang()] && I18N[lang()][key]) || I18N.en[key] || key;
-  return String(d).replace(/\{(\d)\}/g, (_, i) => (a[+i] ?? ''));
-}
-function loc() { return lang() === 'ru' ? 'ru-RU' : 'en-US'; }
-function applyI18n() {
-  document.documentElement.lang = lang();
-  document.title = t('newTab');
-  document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });
-  document.querySelectorAll('[data-i18n-ph]').forEach((el) => { el.placeholder = t(el.dataset.i18nPh); });
-  document.querySelectorAll('[data-i18n-title]').forEach((el) => { el.title = t(el.dataset.i18nTitle); });
-  const fv = $('#folderView');
-  if (fv) fv.dataset.draghint = t('dragHint');
-}
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const svg = (name, cls = 'i') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[name] || ''}</svg>`;
+const ic = (name) => h('span', { class: 'ico', html: svg(name) });
 
-function defaultState() {
-  const navRu = (navigator.language || 'en').toLowerCase().startsWith('ru');
-  return {
-    settings: {
-      theme: 'dark',
-      showClock: true,
-      bg: { mode: 'curated', blur: 3, dim: 35, intervalMin: 30, index: Math.floor(Math.random() * CURATED.length), lastChange: 0, customUrls: [], upload: '', color: PRESETS[0] },
-    },
-    geo: {},
-    fxHist: {},
-    board: [
-      { id: uid(), type: 'folder', title: navRu ? 'Доки' : 'Docs', fx: 0.02, fy: 0.02, fw: 0.15, fh: 0.30, children: [
-        { id: uid(), type: 'link', title: 'MDN', url: 'https://developer.mozilla.org' },
-        { id: uid(), type: 'link', title: 'GitHub', url: 'https://github.com' },
-        { id: uid(), type: 'link', title: 'Stack Overflow', url: 'https://stackoverflow.com' },
-      ]},
-      { id: uid(), type: 'link', title: 'YouTube', url: 'https://youtube.com', fx: 0.19, fy: 0.02, fw: 0.15, fh: 0.30 },
-      { id: uid(), type: 'note', title: navRu ? 'Заметки' : 'Notes', text: navRu ? '• первая мысль' : '• first thought', fx: 0.36, fy: 0.02, fw: 0.34, fh: 0.42 },
-      { id: uid(), type: 'weather', title: navRu ? 'Погода' : 'Weather', city: 'Москва', fx: 0.72, fy: 0.02, fw: 0.24, fh: 0.30 },
-    ],
-  };
+let saveTimer = 0;
+function save(rerender = true) {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => store.save(state), 250);
+  state.ts = Date.now();
+  if (rerender) render();
 }
-
-function toWidget(it) {
-  const base = { id: it.id || uid(), type: it.type, title: it.title || t('untitled'), w: 2, h: 2 };
-  if (it.type === 'folder') return { ...base, children: Array.isArray(it.children) ? it.children : [] };
-  return { ...base, url: it.url || '' };
-}
-// раскладка старых виджетов с сетки (w/h) в свободные координаты — потоком слева направо
-function flowLayout(list) {
-  let x = 0, y = 0, rowH = 0;
-  list.forEach((it) => {
-    const fw = clamp((+it.w || 2) / 12, 0.06, 1);
-    const fh = clamp((+it.h || 2) / VROWS, 0.08, 1);
-    if (x + fw > 1.001) { x = 0; y += rowH; rowH = 0; }
-    it.fx = x; it.fy = y; it.fw = fw; it.fh = fh;
-    delete it.w; delete it.h;
-    x += fw; rowH = Math.max(rowH, fh);
-  });
-  // всё должно влезать в зону без прокрутки — ужмём по вертикали при переполнении
-  const bottom = Math.max(...list.map((it) => it.fy + it.fh));
-  if (bottom > 1) list.forEach((it) => { it.fy /= bottom; it.fh /= bottom; });
-}
-
-// миграция со старых версий (плоская сетка tree -> доска board)
-function migrate(s) {
-  if (!s || !s.settings || (!Array.isArray(s.board) && !Array.isArray(s.tree))) return defaultState();
-  s.settings.bg = s.settings.bg || { mode: 'curated', blur: 3, dim: 35, intervalMin: 30, index: 0, lastChange: 0, customUrls: [], upload: '', color: PRESETS[0] };
-  delete s.settings.searchEngine;
-  if (!s.settings.lang) s.settings.lang = 'auto';
-  if (!Array.isArray(s.board)) {
-    s.board = (s.tree || []).map(toWidget);
-    delete s.tree;
-  }
-  if (typeof s.geo !== 'object' || !s.geo) s.geo = {};
-  if (typeof s.fxHist !== 'object' || !s.fxHist) s.fxHist = {};
-  if (s.board.length && s.board.some((w) => w.fx === undefined)) flowLayout(s.board);
-  s.board.forEach((w) => {
-    const d = DEF_RECT[w.type] || DEF_RECT.link;
-    if (!w.id) w.id = uid();
-    if (typeof w.fx !== 'number' || isNaN(w.fx)) w.fx = 0.02;
-    if (typeof w.fy !== 'number' || isNaN(w.fy)) w.fy = 0.02;
-    if (typeof w.fw !== 'number' || isNaN(w.fw)) w.fw = d.fw;
-    if (typeof w.fh !== 'number' || isNaN(w.fh)) w.fh = d.fh;
-    delete w.w; delete w.h;
-    if (w.type === 'folder' && !Array.isArray(w.children)) w.children = [];
-    if (w.type === 'currency') {
-      if (!w.base) w.base = 'UAH';
-      if (!Array.isArray(w.symbols) || !w.symbols.length) w.symbols = ['USD', 'EUR'];
-    }
-    if (w.type === 'forecast') { w.type = 'weather'; w.showCurrent = true; w.days = 3; w.hours = 0; }
-    if (w.type === 'weather') {
-      if (w.showCurrent === undefined) w.showCurrent = true;
-      if (typeof w.days !== 'number') w.days = 0;
-      if (typeof w.hours !== 'number') w.hours = 0;
-    }
-    if (w.type === 'crypto' && !Array.isArray(w.coins)) w.coins = ['BTC', 'ETH'];
-    if (w.type === 'quote' && !w.font) w.font = 'm';
-  });
-  healTitles(s.board); // чиним названия, испорченные заглушками Cloudflare/капч
-  return s;
-}
-
-const SYNC_PREFIX = 'rdb_';
-const SYNC_CHUNK = 7000; // Firefox Sync: макс ~8 КБ на одну запись, ~100 КБ всего
-const store = {
-  api() {
-    if (typeof browser !== 'undefined' && browser.storage?.sync) {
-      return {
-        get: (k) => browser.storage.sync.get(k),
-        set: (o) => browser.storage.sync.set(o),
-        remove: (k) => browser.storage.sync.remove(k),
-      };
-    }
-    if (typeof chrome !== 'undefined' && chrome.storage?.sync) {
-      const call = (fn, arg) => new Promise((res, rej) => fn(arg, () => {
-        const err = chrome.runtime.lastError;
-        if (err) rej(new Error(err.message));
-        else res();
-      }));
-      return {
-        get: (k) => new Promise((res) => chrome.storage.sync.get(k, (r) => res(r || {}))),
-        set: (o) => call(chrome.storage.sync.set.bind(chrome.storage.sync), o),
-        remove: (k) => call(chrome.storage.sync.remove.bind(chrome.storage.sync), k),
-      };
-    }
-    return null;
-  },
-  async load() {
-    try {
-      const data = await this.loadSync();
-      if (data) return migrate(data);
-    } catch {}
-    try {
-      const raw = localStorage.getItem(LS_KEY);
-      if (raw) return migrate(JSON.parse(raw));
-    } catch {}
-    return defaultState();
-  },
-  async loadSync() {
-    const api = this.api();
-    if (!api) return null;
-    try {
-      const leg = await api.get('state'); // старый формат одной записью
-      if (leg && leg.state) return leg.state;
-    } catch {}
-    const m = await api.get(SYNC_PREFIX + 'meta');
-    const meta = m && m[SYNC_PREFIX + 'meta'];
-    if (!meta || !meta.n) return null;
-    const keys = [];
-    for (let i = 0; i < meta.n; i++) keys.push(SYNC_PREFIX + 'c' + i);
-    const parts = await api.get(keys);
-    let s = '';
-    for (let i = 0; i < meta.n; i++) {
-      const c = parts[SYNC_PREFIX + 'c' + i];
-      if (typeof c !== 'string') return null;
-      s += c;
-    }
-    return JSON.parse(s);
-  },
-  async save(st) {
-    try { localStorage.setItem(LS_KEY, JSON.stringify(st)); } catch {}
-    try { await this.saveSync(st); } catch {}
-  },
-  async saveSync(st) {
-    const api = this.api();
-    if (!api) return;
-    const s = JSON.stringify(st);
-    const n = Math.ceil(s.length / SYNC_CHUNK);
-    if (n > 14) return; // ~100 КБ квота sync: большие сетапы остаются локальными
-    const old = await api.get(SYNC_PREFIX + 'meta');
-    const oldN = (old && old[SYNC_PREFIX + 'meta'] && old[SYNC_PREFIX + 'meta'].n) || 0;
-    for (let i = 0; i < n; i++) {
-      await api.set({ [SYNC_PREFIX + 'c' + i]: s.slice(i * SYNC_CHUNK, (i + 1) * SYNC_CHUNK) });
-    }
-    await api.set({ [SYNC_PREFIX + 'meta']: { n, ts: Date.now() } });
-    for (let i = n; i < oldN; i++) await api.remove(SYNC_PREFIX + 'c' + i);
-    try { await api.remove('state'); } catch {} // чистка старого формата
-  },
-};
-
-let state = defaultState();
-let path = []; // стек id открытых папок; пусто = доска
-let wEditing = null;
-let draggedId = null;
-let dropAfter = false; // дроп в нижнюю половину плитки = вставить после неё
-let bgTimer = null;
-let showingA = true;
-const isEdit = () => document.body.dataset.edit === '1';
-
-// ---------- дерево (корень — доска) ----------
-function getFolderByPath() {
-  let list = state.board, cur = null;
-  for (const id of path) {
-    cur = list.find((i) => i.id === id && i.type === 'folder');
-    if (!cur) return { list: state.board, folder: null };
-    list = cur.children;
-  }
-  return { list, folder: cur };
-}
-function findItem(id, list = state.board, parent = null) {
-  for (const it of list) {
-    if (it.id === id) return { item: it, parent: parent || { children: state.board }, list };
-    if (it.type === 'folder' && Array.isArray(it.children)) {
-      const r = findItem(id, it.children, it);
-      if (r) return r;
-    }
-  }
+function findGroup(id) { return state.groups.find((g) => g.id === id); }
+function findLink(id) {
+  for (const g of state.groups) if (g.kind === 'links') { const i = g.items.findIndex((l) => l.id === id); if (i >= 0) return { g, i, l: g.items[i] }; }
   return null;
 }
-function isDescendant(folderId, maybeChildId) {
-  const f = findItem(folderId);
-  if (!f) return false;
-  const walk = (n) => n.id === maybeChildId || (n.type === 'folder' && (n.children || []).some(walk));
-  return walk(f.item);
+function linkGroups() { return state.groups.filter((g) => g.kind === 'links'); }
+function ensureLinkGroup(preferId) {
+  const g = (preferId && findGroup(preferId)) || linkGroups()[0];
+  if (g && g.kind === 'links') return g;
+  const ng = R.newGroup('links', t('inbox'));
+  state.groups.unshift(ng);
+  return ng;
 }
-function findTrail(id, list = state.board, trail = []) {
-  for (const it of list) {
-    if (it.id === id) return trail;
-    if (it.type === 'folder' && it.children) {
-      const r = findTrail(id, it.children, [...trail, it.id]);
-      if (r) return r;
-    }
-  }
-  return null;
+function kindIcon(kind) {
+  return { links: 'link', note: 'note', todo: 'check', weather: 'widget', currency: 'cash', crypto: 'coin', clock: 'clock', calendar: 'cal',
+    countdown: 'timer', rss: 'rss', iframe: 'frame', github: 'tag', topsites: 'star' }[kind] || 'group';
 }
-function parseSyms(s) {
-  return (s || '').toUpperCase().split(/[^A-Z]+/).filter((x) => /^[A-Z]{3}$/.test(x)).slice(0, 6);
-}
-function prettyHost(url) {
-  try { return new URL(url).hostname.replace(/^www\./, ''); }
-  catch { return ''; }
-}
-// мусорные названия со страниц-заглушек (Cloudflare, капчи, 403/404): не подставлять
-const TITLE_JUNK = [/attention required/i, /just a moment/i, /checking your browser/i, /verify you are a human/i, /are you a robot/i, /access denied/i, /forbidden/i, /captcha/i, /enable javascript/i, /cloudflare/i, /^404\b/, /page not found/i];
-function cleanTitle(t) {
-  t = (t || '').trim();
-  return TITLE_JUNK.some((re) => re.test(t)) ? '' : t;
-}
-function healTitles(list) {
-  (list || []).forEach((it) => {
-    if (it.type === 'link' && it.title && TITLE_JUNK.some((re) => re.test(it.title))) {
-      it.title = prettyHost(it.url) || it.title;
-    }
-    if (it.type === 'folder' && it.children) healTitles(it.children);
-  });
-}
-// название страницы по URL: сначала microlink (любой сайт), потом noembed (oEmbed)
-async function fetchTitle(url, signal) {
-  try {
-    const r = await fetch(`https://api.microlink.io?url=${encodeURIComponent(url)}`, { signal });
-    const j = await r.json();
-    const t1 = j && j.data && j.data.title ? cleanTitle(j.data.title) : '';
-    if (t1) return t1;
-  } catch {}
-  try {
-    const r = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`, { signal });
-    const j = await r.json();
-    const t2 = j && j.title ? cleanTitle(j.title) : '';
-    if (t2) return t2;
-  } catch {}
-  return '';
-}
-function normalizeUrl(u) {
-  u = (u || '').trim();
-  if (!u) return '';
-  if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
-  return u;
-}
-function favicon(url) {
-  try { return `https://www.google.com/s2/favicons?domain=${new URL(url).hostname}&sz=64`; }
-  catch { return ''; }
-}
-// автоиконки как в Heimdall: узнал приложение по названию/хосту — тянем
-// красивую иконку из dashboard-icons, иначе обычный favicon, иначе буква
-const ICON_ALIASES = {
-  proxmox: 'proxmox', proxmoxve: 'proxmox', pve: 'proxmox',
-  pihole: 'pihole', adguardhome: 'adguardhome', adguard: 'adguardhome',
-  unraid: 'unraid', truenas: 'truenas', truenascore: 'truenas', truenasscale: 'truenas',
-  synology: 'synology', qnap: 'qnap',
-  docker: 'docker', portainer: 'portainer', dockge: 'dockge',
-  homeassistant: 'homeassistant', hass: 'homeassistant', hassio: 'homeassistant',
-  esphome: 'esphome', zigbee2mqtt: 'zigbee2mqtt', nodered: 'node-red',
-  jellyfin: 'jellyfin', plex: 'plex', emby: 'emby', navidrome: 'navidrome',
-  audiobookshelf: 'audiobookshelf', kavita: 'kavita', calibre: 'calibre',
-  sonarr: 'sonarr', radarr: 'radarr', lidarr: 'lidarr', readarr: 'readarr',
-  prowlarr: 'prowlarr', bazarr: 'bazarr', overseerr: 'overseerr', overseer: 'overseerr',
-  jellyseerr: 'jellyseerr', jellyseer: 'jellyseerr', tautulli: 'tautulli', tdarr: 'tdarr',
-  qbittorrent: 'qbittorrent', qbit: 'qbittorrent', transmission: 'transmission',
-  deluge: 'deluge', sabnzbd: 'sabnzbd', sab: 'sabnzbd', nzbget: 'nzbget', jackett: 'jackett',
-  grafana: 'grafana', uptimekuma: 'uptime-kuma', uptime: 'uptime-kuma', healthchecks: 'healthchecks',
-  netdata: 'netdata', scrutiny: 'scrutiny',
-  traefik: 'traefik', nginxproxymanager: 'nginx-proxy-manager',
-  vaultwarden: 'vaultwarden', bitwarden: 'bitwarden', authentik: 'authentik', authelia: 'authelia',
-  nextcloud: 'nextcloud', immich: 'immich', photoprism: 'photoprism',
-  paperless: 'paperless-ngx', paperlessngx: 'paperless-ngx',
-  filebrowser: 'filebrowser', syncthing: 'syncthing', duplicati: 'duplicati',
-  gitea: 'gitea', gitlab: 'gitlab', github: 'github', mineos: 'mineos',
-  mealie: 'mealie', freshrss: 'freshrss', vikunja: 'vikunja',
-  heimdall: 'heimdall', homarr: 'homarr', dashy: 'dashy', homepage: 'homepage', flame: 'flame',
-  wireguard: 'wireguard', wgeasy: 'wg-easy', tailscale: 'tailscale',
-  dozzle: 'dozzle', watchtower: 'watchtower', changedetection: 'changedetection-io',
-  frigate: 'frigate',
-  youtube: 'youtube', gmail: 'gmail', discord: 'discord', telegram: 'telegram',
-  reddit: 'reddit', spotify: 'spotify', netflix: 'netflix', twitch: 'twitch',
-  steam: 'steam', notion: 'notion', google: 'google', stackoverflow: 'stackoverflow',
-};
-const ICON_CUSTOM = {
-  'community-scripts.github.io': 'https://cdn.jsdelivr.net/gh/loganmarchione/homelab-svg-assets/assets/proxmox.svg',
-  'community-scripts.org': 'https://cdn.jsdelivr.net/gh/loganmarchione/homelab-svg-assets/assets/proxmox.svg',
-};
-const ICON_STOPLIST = new Set(['com', 'org', 'net', 'io', 'ru', 'su', 'by', 'ua', 'kz', 'dev', 'app', 'me', 'info', 'online', 'site', 'web', 'cloud', 'ai', 'tech', 'pro', 'media', 'local', 'lan', 'home', 'internal', 'corp', 'biz', 'tv', 'cc', 'co', 'name', 'page', 'top', 'xyz']);
-function iconCandidates(link) {
-  const title = link.title, url = link.url;
-  const out = [];
-  if (link.icon) out.push(link.icon); // своя ссылка — всегда первая
-  if (!link.noicon) {
-  const seen = new Set();
-  const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const push = (n) => {
-    const base = ICON_ALIASES[n];
-    if (base && !seen.has(base)) {
-      seen.add(base);
-      out.push(`https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/svg/${base}.svg`);
-      out.push(`https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/${base}.png`);
-    }
-  };
-    const pushExtra = (n) => {
-      if (!n || seen.has('x:' + n)) return;
-      seen.add('x:' + n);
-      out.push(`https://cdn.jsdelivr.net/gh/selfhst/icons/svg/${n}.svg`);
-      out.push(`https://cdn.jsdelivr.net/gh/selfhst/icons/png/${n}.png`);
-      out.push(`https://cdn.jsdelivr.net/npm/simple-icons/icons/${n}.svg`);
-    };
-    const eat = (n) => { if (n) { push(n); pushExtra(n); } };
-    if (title) eat(norm(title));
-  let host = '', origin = '', isLocal = false;
-  try {
-    const u = new URL(url);
-    host = u.hostname;
-    origin = u.origin;
-    isLocal = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[::1\]|\[fe80)/i.test(host) || !host.includes('.') || /^[0-9a-fA-F:.]+$/.test(host);
-    host.toLowerCase().split('.').forEach((p) => {
-      const n = norm(p);
-      if (!p || p === 'www' || ICON_STOPLIST.has(n)) return;
-      eat(n);
-    });
-  } catch {}
-  try {
-    const h = new URL(url).hostname.toLowerCase();
-    if (ICON_CUSTOM[h]) out.push(ICON_CUSTOM[h]);
-  } catch {}
-  // картинка напрямую с сайта — единственный способ для IP и локалок
-  if (origin) out.push(origin + '/favicon.ico');
-  if (host && !isLocal) out.push(`https://icons.duckduckgo.com/ip3/${host}.ico`);
-  const fav = favicon(url);
-  if (fav) out.push(fav);
-  } // noicon: только своя ссылка (или буква)
-  return out;
-}
-function appendIconImg(box, link, cls) {
-  const urls = iconCandidates(link);
-  if (!urls.length) return;
-  const img = document.createElement('img');
-  img.loading = 'lazy';
-  img.alt = '';
-  img.draggable = false;
-  img.referrerPolicy = 'no-referrer';
-  if (cls) img.className = cls;
-  let i = 0, retries = 0;
-  img.onerror = () => {
-    i++;
-    if (i < urls.length) { img.src = urls[i]; return; }
-    // всё мимо: возможно временный затык (rate-limit) — ещё две попытки с паузой
-    if (retries < 2 && box.isConnected) {
-      retries++;
-      setTimeout(() => { i = 0; img.src = urls[0]; }, 4000 * retries);
-    } else img.remove();
-  };
-  img.src = urls[0];
-  box.appendChild(img);
-}
-function firstLetter(title) {
-  const t = (title || '?').trim();
-  return (t[0] || '?').toUpperCase();
-}
-// размеры теперь свободные (fx/fy/fw/fh от размера зоны), см. placeEl
+const kName = (k) => t('k' + k[0].toUpperCase() + k.slice(1));
 
-// ---------- ФОН ----------
-function bgList() {
-  const b = state.settings.bg;
-  if (b.mode === 'custom') {
-    const urls = (b.customUrls || []).map((s) => s.trim()).filter(Boolean);
-    return urls.length ? urls : CURATED;
-  }
-  if (b.mode === 'upload') return b.upload ? [b.upload] : CURATED;
-  return CURATED;
-}
-function applyFilters() {
-  const { blur, dim } = state.settings.bg;
-  document.querySelectorAll('.bg').forEach((el) => { el.style.filter = blur > 0 ? `blur(${blur}px) scale(1.06)` : 'none'; });
-  $('#dim').style.opacity = (dim / 100).toFixed(2);
-}
-function paintBg(urlOrCss, isImage) {
-  const show = showingA ? $('#bgB') : $('#bgA');
-  const hide = showingA ? $('#bgA') : $('#bgB');
-  if (isImage) {
-    const img = new Image();
-    img.onload = () => {
-      show.style.backgroundImage = `url("${urlOrCss}")`;
-      show.style.backgroundColor = 'transparent';
-      show.hidden = false; show.style.opacity = 1;
-      hide.style.opacity = 0;
-      setTimeout(() => { hide.hidden = true; }, 850);
-      showingA = !showingA;
-    };
-    img.onerror = () => {};
-    img.src = urlOrCss;
-  } else {
-    show.style.backgroundImage = 'none';
-    show.style.background = urlOrCss;
-    show.hidden = false; show.style.opacity = 1;
-    hide.style.opacity = 0;
-    setTimeout(() => { hide.hidden = true; }, 850);
-    showingA = !showingA;
-  }
-  applyFilters();
-}
-function currentBgTarget() {
-  const b = state.settings.bg;
-  if (b.mode === 'gradient' || b.mode === 'color') return { css: b.color, isImage: false };
-  const list = bgList();
-  b.index = ((b.index % list.length) + list.length) % list.length;
-  return { css: list[b.index], isImage: true };
-}
-function showBg() {
-  const bg = currentBgTarget();
-  paintBg(bg.css, bg.isImage);
-  const b = state.settings.bg;
-  $('#credit').innerHTML = (b.mode === 'curated' || (b.mode === 'custom' && !b.customUrls.length && !b.upload))
-    ? `${t('photo')} <a href="https://unsplash.com" target="_blank">Unsplash</a>` : '';
-  if (bg.isImage) {
-    const list = bgList();
-    const nx = list[(b.index + 1) % list.length];
-    if (nx) { const i = new Image(); i.src = nx; }
-  }
-}
-function nextBg(step = 1) {
-  const b = state.settings.bg;
-  if (b.mode === 'gradient' || b.mode === 'color') return;
-  b.index += step;
-  b.lastChange = Date.now();
-  store.save(state);
-  showBg();
-}
-function scheduleBg() {
-  clearInterval(bgTimer);
-  const b = state.settings.bg;
-  const need = b.intervalMin === 0
-    ? true
-    : (Date.now() - (b.lastChange || 0)) > b.intervalMin * 60000;
-  if ((b.mode === 'curated' || b.mode === 'custom') && need && b.lastChange !== 0) b.index++;
-  if ((b.mode === 'curated' || b.mode === 'custom') && b.intervalMin > 0) {
-    bgTimer = setInterval(() => nextBg(1), b.intervalMin * 60000);
-  }
-  b.lastChange = b.lastChange || Date.now();
-}
-
-function fileToDataUrl(file, maxDim = 1920) {
-  return new Promise((res, rej) => {
-    const r = new FileReader();
-    r.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        let { width: w, height: h } = img;
-        const k = Math.min(1, maxDim / Math.max(w, h));
-        w = Math.round(w * k); h = Math.round(h * k);
-        const c = document.createElement('canvas');
-        c.width = w; c.height = h;
-        c.getContext('2d').drawImage(img, 0, 0, w, h);
-        res(c.toDataURL('image/jpeg', 0.85));
-      };
-      img.onerror = rej;
-      img.src = r.result;
-    };
-    r.onerror = rej;
-    r.readAsDataURL(file);
-  });
-}
+// кэш для виджетов и иконок — только на этом устройстве, не синхронизируется
+const cache = (() => {
+  let c = {};
+  try { c = JSON.parse(localStorage.getItem('rdb2_cache') || '{}') || {}; } catch {}
+  c.icon = c.icon || {}; c.wx = c.wx || {}; c.geo = c.geo || {}; c.fx = c.fx || {}; c.fxHist = c.fxHist || {}; c.cr = c.cr || {};
+  let tm = 0;
+  return { c, save() { clearTimeout(tm); tm = setTimeout(() => { try { localStorage.setItem('rdb2_cache', JSON.stringify(c)); } catch {} }, 400); } };
+})();
 
 // ---------- иконки ----------
-function buildPreview(iconBox, folder) {
-  iconBox.innerHTML = '';
-  const kids = (folder.children || []).slice(0, 4);
-  for (let i = 0; i < 4; i++) {
-    const cell = document.createElement('span');
-    cell.className = 'pv';
-    const k = kids[i];
-    if (k) {
-      if (k.type === 'folder') {
-        cell.appendChild(uiIcon('folder'));
-      } else {
-        const letter = document.createElement('span');
-        letter.className = 'pv-letter';
-        letter.textContent = firstLetter(k.title);
-        cell.appendChild(letter);
-        appendIconImg(cell, k);
-      }
-    }
-    iconBox.appendChild(cell);
-  }
-}
-
-function buildLinkIcon(iconBox, link) {
-  iconBox.innerHTML = '';
-  const letter = document.createElement('span');
-  letter.className = 'link-letter';
-  letter.textContent = firstLetter(link.title);
-  iconBox.appendChild(letter);
-  appendIconImg(iconBox, link, 'link-fav');
-}
-
-function buildChecklist(el, w) {
-  if (!Array.isArray(w.items)) w.items = [];
-  const head = document.createElement('div');
-  head.className = 'w-note-head';
-  const tt = document.createElement('span');
-  tt.textContent = w.title || t('tChecklist');
-  head.appendChild(tt);
-  head.appendChild(widgetMini(() => openWModal('edit', w), () => delWidget(w.id)));
-  const list = document.createElement('div');
-  list.className = 'w-check-list';
-  const paintItem = (item) => {
-    const li = document.createElement('label');
-    li.className = 'w-check-item' + (item.done ? ' done' : '');
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = !!item.done;
-    cb.onchange = () => { item.done = cb.checked; li.classList.toggle('done', item.done); quietSave(); };
-    const tx = document.createElement('span');
-    tx.textContent = item.text;
-    tx.title = item.text;
-    const del = document.createElement('button');
-    del.className = 'del';
-    del.type = 'button';
-    del.appendChild(uiIcon('delete'));
-    del.title = t('remove');
-    del.onclick = (e) => { e.preventDefault(); w.items.splice(w.items.indexOf(item), 1); li.remove(); quietSave(); };
-    li.append(cb, tx, del);
-    return li;
+function iconKey(l) { return (l.icon || '') + '|' + l.url + '|' + l.title; }
+function iconBox(l, cls = 'ic') {
+  const box = h('span', { class: cls });
+  const txt = (l.icon || '').startsWith('txt:') ? l.icon.slice(4) : '';
+  const letter = h('span', { class: 'ic-letter', text: txt || R.letterOf(l.title) });
+  if (!txt) box.style.setProperty('--h', R.hueOf(l.title || l.url));
+  else box.classList.add('ic-emoji');
+  box.append(letter);
+  if (txt) return box;
+  let urls = R.iconCandidates(l);
+  const key = iconKey(l);
+  const hit = cache.c.icon[key];
+  if (hit === '') return box; // уже знаем: картинки нет, только буква
+  if (hit) urls = [hit, ...urls.filter((u) => u !== hit)];
+  if (!urls.length) return box;
+  const img = h('img', { alt: '', draggable: false, decoding: 'async', referrerPolicy: 'no-referrer' });
+  let i = 0;
+  const next = () => {
+    i++;
+    if (i < urls.length) img.src = urls[i];
+    else { img.remove(); if (navigator.onLine) { cache.c.icon[key] = ''; cache.save(); } }
   };
-  w.items.forEach((item) => list.appendChild(paintItem(item)));
-  const form = document.createElement('form');
-  form.className = 'w-check-add';
-  const inp = document.createElement('input');
-  inp.placeholder = t('newItem');
-  inp.maxLength = 120;
-  const add = document.createElement('button');
-  add.type = 'submit';
-  add.textContent = '+';
-  add.title = t('add');
-  form.onsubmit = (e) => {
-    e.preventDefault();
-    const v = inp.value.trim();
-    if (!v) return;
-    const item = { id: uid(), text: v };
-    w.items.push(item);
-    list.appendChild(paintItem(item));
-    list.scrollTop = list.scrollHeight;
-    inp.value = '';
-    inp.focus();
-    quietSave();
+  img.onload = () => {
+    // гугл отдаёт серый глобус 16px, если иконки нет — считаем это промахом
+    if (/google\.com\/s2|duckduckgo/.test(img.src) && img.naturalWidth < 24) return next();
+    if (img.naturalWidth < 2) return next();
+    box.classList.add('has-img');
+    if (cache.c.icon[key] !== urls[i]) { cache.c.icon[key] = urls[i]; trimIconCache(); cache.save(); }
   };
-  form.append(inp, add);
-  el.append(head, list, form);
+  img.onerror = next;
+  img.src = urls[0];
+  box.append(img);
+  return box;
+}
+function trimIconCache() {
+  const k = Object.keys(cache.c.icon);
+  if (k.length > 800) k.slice(0, k.length - 800).forEach((x) => delete cache.c.icon[x]);
 }
 
-// иконки интерфейса из Papirus (GPL-3.0, лежат в assets/icons)
-function uiIcon(name, alt = '') {
-  const img = document.createElement('img');
-  img.src = `assets/icons/${name}.svg`;
-  img.alt = alt;
-  img.draggable = false;
-  return img;
-}
-function paintSyms(selected) {
-  const box = $('#wSymsBox');
-  box.innerHTML = '';
-  CURRENCIES.forEach((c) => {
-    const row = document.createElement('div');
-    row.className = 'check curr-opt';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.value = c;
-    cb.checked = selected.includes(c);
-    const sym = document.createElement('b');
-    sym.textContent = CUR_SYM[c] || '';
-    const code = document.createElement('span');
-    code.className = 'cc';
-    code.textContent = c;
-    const nm = document.createElement('span');
-    nm.className = 'cn';
-    nm.textContent = (CUR_NAMES[lang()] || {})[c] || '';
-    row.append(cb, sym, code, nm);
-    row.onclick = (e) => { if (e.target !== cb) cb.checked = !cb.checked; };
-    box.appendChild(row);
-  });
-}
-function getSyms() {
-  return [...document.querySelectorAll('#wSymsBox input:checked')].map((i) => i.value).slice(0, 6);
-}
-function paintBase(selected) {
-  const sel = $('#wBase');
-  sel.innerHTML = '';
-  CURRENCIES.forEach((c) => {
-    const o = document.createElement('option');
-    o.value = c;
-    o.textContent = `${c} — ${(CUR_NAMES[lang()] || {})[c] || ''}`;
-    if (c === selected) o.selected = true;
-    sel.appendChild(o);
-  });
-}
-function widgetMini(onEdit, onDel) {
-  const mini = document.createElement('div');
-  mini.className = 'mini';
-  if (onEdit) {
-    const bEdit = document.createElement('button');
-    bEdit.title = t('editTip');
-    bEdit.onclick = (e) => { e.stopPropagation(); onEdit(); };
-    bEdit.appendChild(uiIcon('edit'));
-    mini.append(bEdit);
-  }
-  const bDel = document.createElement('button');
-  bDel.title = t('delTip');
-  bDel.onclick = (e) => { e.stopPropagation(); onDel(); };
-  bDel.appendChild(uiIcon('delete'));
-  mini.append(bDel);
-  return mini;
-}
-
-// ---------- виджеты доски ----------
-function placeEl(el, w) {
-  el.style.left = (w.fx * 100) + '%';
-  el.style.top = (w.fy * 100) + '%';
-  el.style.width = (w.fw * 100) + '%';
-  el.style.height = (w.fh * 100) + '%';
-}
-
-// мини-ссылка внутри папки OnePlus (кликабельна без открытия)
-function inlineMini(k) {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.className = 'w-mini';
-  b.title = k.title || '';
-  const ic = document.createElement('span');
-  ic.className = 'mi';
-  if (k.type === 'folder') {
-    ic.appendChild(uiIcon('folder'));
-  } else {
-    const lt = document.createElement('span');
-    lt.textContent = firstLetter(k.title);
-    ic.appendChild(lt);
-    appendIconImg(ic, k);
-  }
-  const nm = document.createElement('span');
-  nm.className = 'mn';
-  nm.textContent = k.title || '';
-  b.append(ic, nm);
-  b.onclick = (e) => {
-    e.stopPropagation();
-    if (isEdit()) return;
-    if (k.type === 'link') window.open(k.url, '_blank');
-    else {
-      const tr = findTrail(k.id);
-      if (tr) { path = [...tr, k.id]; render(); }
-    }
-  };
-  return b;
-}
-
-function widgetEl(w) {
-  const el = document.createElement('div');
-  el.className = `widget w-${w.type}`;
-  el.dataset.wid = w.id;
-  placeEl(el, w);
-
-  if (w.type === 'note') {
-    const head = document.createElement('div');
-    head.className = 'w-note-head';
-    const tt = document.createElement('span');
-    tt.textContent = w.title || t('tNote');
-    head.appendChild(tt);
-    head.appendChild(widgetMini(() => openWModal('edit', w), () => delWidget(w.id)));
-    const ta = document.createElement('textarea');
-    ta.className = 'w-note-text';
-    ta.value = w.text || '';
-    ta.placeholder = t('writePh');
-    ta.addEventListener('input', () => { w.text = ta.value; quietSave(); });
-    ta.addEventListener('blur', () => store.save(state));
-    el.append(head, ta);
-  } else if (w.type === 'weather') {
-    // один гибкий виджет: текущая + часы + дни — что включено в настройках
-    if (w.showCurrent !== false) {
-      const ic = document.createElement('div');
-      ic.className = 'w-wicon';
-      ic.textContent = '🌡';
-      const tp = document.createElement('div');
-      tp.className = 'w-wtemp';
-      tp.textContent = '…';
-      const ct = document.createElement('div');
-      ct.className = 'w-wcity';
-      ct.textContent = w.city || '';
-      el.append(ic, tp, ct);
-    }
-    const hrs = document.createElement('div');
-    hrs.className = 'w-hours';
-    const rows = document.createElement('div');
-    rows.className = 'w-rows';
-    el.append(hrs, rows);
-    if (w.showCurrent === false && !(+w.days > 0) && !(+w.hours > 0)) {
-      const hint = document.createElement('div');
-      hint.className = 'w-wcity';
-      hint.textContent = t('setupHint');
-      el.appendChild(hint);
-    }
-    el.appendChild(widgetMini(() => openWModal('edit', w), () => delWidget(w.id)));
-    el.title = t('tWeather') + ': ' + (w.city || '');
-  } else if (w.type === 'currency') {
-    const rows = document.createElement('div');
-    rows.className = 'w-rows';
-    el.append(rows);
-    el.title = t('tCurrency');
-    el.appendChild(widgetMini(() => openWModal('edit', w), () => delWidget(w.id)));
-  } else if (w.type === 'crypto') {
-    const rows = document.createElement('div');
-    rows.className = 'w-rows';
-    el.append(rows);
-    el.title = 'CoinGecko';
-    el.appendChild(widgetMini(() => openWModal('edit', w), () => delWidget(w.id)));
-  } else if (w.type === 'quote') {
-    el.classList.add('fs-' + (w.font || 'm'));
-    const q = document.createElement('div');
-    q.className = 'w-quote';
-    const a = document.createElement('div');
-    a.className = 'w-quote-a';
-    paintQuote(w, q, a);
-    const sh = document.createElement('button');
-    sh.className = 'w-shuffle';
-    sh.type = 'button';
-    sh.appendChild(uiIcon('refresh'));
-    sh.title = t('quoteAnother');
-    sh.onclick = (e) => { e.stopPropagation(); w.qoff = (w.qoff || 0) + 1; paintQuote(w, q, a); quietSave(); };
-    el.append(q, a, sh);
-    el.appendChild(widgetMini(null, () => delWidget(w.id)));
-  } else if (w.type === 'link') {
-    const icon = document.createElement('div');
-    icon.className = 'w-icon';
-    buildLinkIcon(icon, w);
-    const name = document.createElement('div');
-    name.className = 'w-name';
-    name.textContent = w.title;
-    el.append(icon, name);
-    el.title = w.url || '';
-    el.onclick = (e) => {
-      if (el.dataset.noclick) return;
-      if (e.target.closest('.mini') || e.target.closest('.rz')) return;
-      if (isEdit()) return; // в режиме ✎ клики отключены, чтобы спокойно расставлять
-      window.open(w.url, '_blank');
-    };
-    el.appendChild(widgetMini(() => openWModal('edit', w), () => delWidget(w.id)));
-  } else {
-    // папка OnePlus: ссылки прямо внутри, остаток — в кнопку +N
-    const kids = w.children || [];
-    const name = document.createElement('div');
-    name.className = 'w-name';
-    name.textContent = w.title;
-    const box = document.createElement('div');
-    box.className = 'w-inline';
-    const zr = $('#grid').getBoundingClientRect();
-    const cols = Math.max(1, Math.floor(((w.fw * zr.width) - 16) / 52));
-    const rows = Math.max(1, Math.floor(((w.fh * zr.height) - 70) / 52));
-    const cap = Math.max(1, cols * rows);
-    if (!kids.length) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'w-mini';
-      const ic = document.createElement('span');
-      ic.className = 'mi';
-      ic.appendChild(uiIcon('folder'));
-      const nm = document.createElement('span');
-      nm.className = 'mn';
-      nm.textContent = t('emptyList');
-  b.append(ic, nm);
-  b.addEventListener('contextmenu', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (k.type === 'link') openCtx(e.clientX, e.clientY, ctxItemsLink(k, true));
-    else openCtx(e.clientX, e.clientY, ctxItemsFolder(k, true, () => { const tr = findTrail(k.id); if (tr) { path = [...tr, k.id]; render(); } }));
-  });
-      b.onclick = (e) => { e.stopPropagation(); if (isEdit()) return; path = [w.id]; render(); };
-      box.appendChild(b);
-    } else {
-      const show = kids.length > cap ? cap - 1 : kids.length;
-      kids.slice(0, show).forEach((k) => box.appendChild(inlineMini(k)));
-      if (kids.length > cap) {
-        const over = kids.length - show;
-        const more = document.createElement('button');
-        more.type = 'button';
-        more.className = 'w-mini w-more';
-        more.title = t('mOpen');
-        const ic = document.createElement('span');
-        ic.className = 'mi';
-        ic.textContent = '+' + over;
-        const nm = document.createElement('span');
-        nm.className = 'mn';
-        nm.textContent = t('all');
-        more.append(ic, nm);
-        more.onclick = (e) => { e.stopPropagation(); if (isEdit()) return; path = [w.id]; render(); };
-        box.appendChild(more);
-      }
-    }
-    el.append(name, box);
-    el.onclick = (e) => {
-      if (el.dataset.noclick) return;
-      if (e.target.closest('.mini') || e.target.closest('.rz')) return;
-      if (isEdit()) return;
-      path = [w.id];
-      render();
-    };
-    el.appendChild(widgetMini(() => openWModal('edit', w), () => delWidget(w.id)));
-  }
-
-  // ручка ресайза
-  const rz = document.createElement('div');
-  rz.className = 'rz';
-  rz.title = t('resize');
-  el.appendChild(rz);
-  initResize(rz, el, w);
-
-  // свободное перемещение в режиме ✎ (pointer events: мышь + тач)
-  initFreeDrag(el, w);
-
-  // правая кнопка (в полях ввода — системное меню для вставки)
-  el.addEventListener('contextmenu', (e) => {
-    if (e.target.closest('textarea,input')) return;
-    e.preventDefault();
-    e.stopPropagation();
-    if (w.type === 'link') openCtx(e.clientX, e.clientY, ctxItemsLink(w, false));
-    else if (w.type === 'folder') openCtx(e.clientX, e.clientY, ctxItemsFolder(w, false, () => { path = [w.id]; render(); }));
-    else openCtx(e.clientX, e.clientY, ctxItemsWidget(w));
-  });
-  return el;
-}
-
-function delWidget(id) {
-  const w = state.board.find((x) => x.id === id);
-  if (!w) return;
-  if (w.type === 'folder' && w.children.length && !confirm(t('delFolder', w.title, w.children.length))) return;
-  if (w.type !== 'folder' && !confirm(t('delOne', w.title || t('untitled')))) return;
-  state.board.splice(state.board.findIndex((x) => x.id === id), 1);
-  path = path.filter((pid) => findItem(pid));
-  save();
-}
-
-// свободное перемещение виджета — работает и в обычном режиме;
-// ссылку/папку можно бросить на папку — переедет внутрь
-function initFreeDrag(el, w) {
-  const canContain = w.type === 'link' || w.type === 'folder';
-  let pendingHi = null;
-  const clearHi = () => { if (pendingHi) { pendingHi.classList.remove('drop-target'); pendingHi = null; } };
-  el.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('textarea,input,button,a,.rz,.mini')) return;
-    e.preventDefault();
-    const zone = $('#grid');
-    const zr = zone.getBoundingClientRect();
-    const startX = e.clientX, startY = e.clientY;
-    const ox = w.fx * zr.width, oy = w.fy * zr.height;
-    let moved = false;
-    try { el.setPointerCapture(e.pointerId); } catch {}
-    const move = (ev) => {
-      const dx = ev.clientX - startX, dy = ev.clientY - startY;
-      if (!moved && Math.hypot(dx, dy) < 4) return;
-      moved = true;
-      el.classList.add('dragging');
-      el.style.pointerEvents = 'none'; // чтобы elementFromPoint видел папку под виджетом
-      const ew = el.offsetWidth, eh = el.offsetHeight;
-      const nx = clamp(Math.round((ox + dx) / SNAP) * SNAP, 0, Math.max(0, zr.width - ew));
-      const ny = clamp(Math.round((oy + dy) / SNAP) * SNAP, 0, Math.max(0, zr.height - eh));
-      // запрет налезания друг на друга: целиком, иначе скользим вдоль стороны
-      const cur = { x: el.offsetLeft, y: el.offsetTop, w: ew, h: eh };
-      if (!hitsAny({ ...cur, x: nx, y: ny }, w.id)) { cur.x = nx; cur.y = ny; }
-      else if (!hitsAny({ ...cur, x: nx }, w.id)) cur.x = nx;
-      else if (!hitsAny({ ...cur, y: ny }, w.id)) cur.y = ny;
-      el.style.left = cur.x + 'px';
-      el.style.top = cur.y + 'px';
-      clearHi();
-      if (canContain) {
-        const t = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.widget.w-folder');
-        if (t && t.dataset.wid !== w.id) { t.classList.add('drop-target'); pendingHi = t; }
-      }
-    };
-    const up = () => {
-      el.removeEventListener('pointermove', move);
-      el.removeEventListener('pointerup', up);
-      el.removeEventListener('pointercancel', up);
-      el.style.pointerEvents = '';
-      el.classList.remove('dragging');
-      const target = pendingHi;
-      clearHi();
-      if (!moved) return;
-      el.dataset.noclick = '1'; // клик после перетаскивания не открывать
-      setTimeout(() => delete el.dataset.noclick, 60);
-      if (target && canContain && moveIntoFolder(w.id, target.dataset.wid)) return;
-      if (target && canContain) { save(); return; } // невалидная цель — вернуть на место
-      const zr2 = zone.getBoundingClientRect();
-      if (zr2.width > 0) w.fx = clamp(el.offsetLeft / zr2.width, 0, 1);
-      if (zr2.height > 0) w.fy = clamp(el.offsetTop / zr2.height, 0, 1);
-      save();
-    };
-    el.addEventListener('pointermove', move);
-    el.addEventListener('pointerup', up);
-    el.addEventListener('pointercancel', up);
-  });
-}
-
-function initResize(handle, el, w) {
-  handle.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const zone = $('#grid');
-    const zr = zone.getBoundingClientRect();
-    const startX = e.clientX, startY = e.clientY;
-    const sw = el.offsetWidth, sh = el.offsetHeight;
-    const mm = MIN_PX[w.type] || [90, 90];
-    try { handle.setPointerCapture(e.pointerId); } catch {}
-    const move = (ev) => {
-      const nw = clamp(Math.round((sw + ev.clientX - startX) / SNAP) * SNAP, mm[0], Math.max(mm[0], zr.width - el.offsetLeft));
-      const nh = clamp(Math.round((sh + ev.clientY - startY) / SNAP) * SNAP, mm[1], Math.max(mm[1], zr.height - el.offsetTop));
-      // размер, не налезающий на соседей
-      if (hitsAny({ x: el.offsetLeft, y: el.offsetTop, w: nw, h: nh }, w.id)) return;
-      el.style.width = nw + 'px';
-      el.style.height = nh + 'px';
-    };
-    const up = () => {
-      handle.removeEventListener('pointermove', move);
-      handle.removeEventListener('pointerup', up);
-      handle.removeEventListener('pointercancel', up);
-      const zr2 = zone.getBoundingClientRect();
-      if (zr2.width > 0) w.fw = clamp(el.offsetWidth / zr2.width, 0.05, 1);
-      if (zr2.height > 0) w.fh = clamp(el.offsetHeight / zr2.height, 0.05, 1);
-      save();
-    };
-    handle.addEventListener('pointermove', move);
-    handle.addEventListener('pointerup', up);
-    handle.addEventListener('pointercancel', up);
-  });
-}
-
-// тихая запись без перерендера (текст заметок)
-let noteT = null;
-function quietSave() {
-  clearTimeout(noteT);
-  noteT = setTimeout(() => store.save(state), 600);
-}
-
-// ---------- плитка внутри окна папки (классика) ----------
-function tileEl(it) {
-  const el = document.createElement('div');
-  el.className = 'tile' + (it.type === 'folder' ? ' folder' : '');
-  el.draggable = true;
-  el.dataset.id = it.id;
-
-  const icon = document.createElement('div');
-  icon.className = 'icon';
-  const name = document.createElement('div');
-  name.className = 'name';
-  name.textContent = it.title;
-  const mini = document.createElement('div');
-  mini.className = 'mini';
-  const bEdit = document.createElement('button');
-  bEdit.onclick = () => openWModal('edit', it);
-  bEdit.appendChild(uiIcon('edit'));
-  const bDel = document.createElement('button');
-  bDel.appendChild(uiIcon('delete'));
-  bDel.onclick = () => {
-    if (!confirm(t('delOne', it.title))) return;
-    const found = findItem(it.id);
-    if (!found) return;
-    found.parent.children.splice(found.parent.children.findIndex((x) => x.id === it.id), 1);
-    path = path.filter((pid) => findItem(pid));
-    save();
-  };
-  mini.append(bEdit, bDel);
-  const _loc = findItem(it.id);
-  if (_loc && _loc.parent.children !== state.board) {
-    const bTop = document.createElement('button');
-    bTop.title = t('toBoardTip');
-    bTop.onclick = () => moveToBoard(it.id);
-    bTop.appendChild(uiIcon('totop'));
-    mini.append(bTop);
-  }
-
-  if (it.type === 'folder') {
-    icon.classList.add('preview');
-    buildPreview(icon, it);
-    const count = document.createElement('div');
-    count.className = 'count';
-    count.textContent = it.children.length ? String(it.children.length) : '';
-    el.append(icon, name, count, mini);
-    el.onclick = (e) => {
-      if (e.target.closest('.mini')) return;
-      path.push(it.id);
-      render();
-    };
-  } else {
-    buildLinkIcon(icon, it);
-    el.append(icon, name, mini);
-    el.title = it.url;
-    el.onclick = (e) => { if (!e.target.closest('.mini')) window.open(it.url, '_blank'); };
-  }
-
-  el.addEventListener('dragstart', (e) => { draggedId = it.id; document.body.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
-  el.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    el.classList.add('drag-over');
-    const r = el.getBoundingClientRect();
-    dropAfter = (e.clientY - r.top) > r.height / 2;
-    el.classList.toggle('drop-after', dropAfter);
-  });
-  el.addEventListener('dragleave', () => { el.classList.remove('drag-over'); el.classList.remove('drop-after'); });
-  el.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); el.classList.remove('drag-over'); el.classList.remove('drop-after'); moveItem(draggedId, it.id, dropAfter); dropAfter = false; });
-  el.addEventListener('contextmenu', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const loc = findItem(it.id);
-    const nested = loc && loc.parent.children !== state.board;
-    if (it.type === 'link') openCtx(e.clientX, e.clientY, ctxItemsLink(it, nested));
-    else openCtx(e.clientX, e.clientY, ctxItemsFolder(it, nested, () => { path.push(it.id); render(); }));
-  });
-  return el;
-}
-
-function moveItem(dragId, targetId, after = false) {
-  if (!dragId || dragId === targetId) return;
-  const d = findItem(dragId), t = findItem(targetId);
-  if (!d || !t) return;
-  if (d.item.type !== 'link' && d.item.type !== 'folder') return alert(t('onlyBoard'));
-  if (t.item.type === 'folder') {
-    if (d.item.type === 'folder' && (dragId === targetId || isDescendant(dragId, targetId))) return alert(t('selfNest'));
-    d.parent.children.splice(d.parent.children.findIndex((x) => x.id === dragId), 1);
-    t.item.children.push(d.item);
-  } else if (d.parent !== t.parent) {
-    d.parent.children.splice(d.parent.children.findIndex((x) => x.id === dragId), 1);
-    const to = t.parent.children.findIndex((x) => x.id === targetId) + (after ? 1 : 0);
-    t.parent.children.splice(to, 0, d.item);
-  } else {
-    const arr = d.parent.children;
-    const [m] = arr.splice(arr.findIndex((x) => x.id === dragId), 1);
-    arr.splice(arr.findIndex((x) => x.id === targetId) + (after ? 1 : 0), 0, m);
-  }
-  save();
-}
-
-// вынести элемент из папки на доску (drag из окна невозможен — окно перекрывает доску)
-function moveToBoard(id) {
-  if (!id) return;
-  const f = findItem(id);
-  if (!f || f.parent.children === state.board) return;
-  if (f.item.type !== 'link' && f.item.type !== 'folder') return;
-  f.parent.children.splice(f.parent.children.findIndex((x) => x.id === id), 1);
-  placeOnBoard(f.item);
-  state.board.push(f.item);
-  save();
-}
-
-// перетащить ссылку/папку на доске в папку
-function moveIntoFolder(dragId, targetId) {
-  if (!dragId || dragId === targetId) return false;
-  const d = findItem(dragId), t = findItem(targetId);
-  if (!d || !t || t.item.type !== 'folder') return false;
-  if (d.item.type !== 'link' && d.item.type !== 'folder') return false;
-  if (d.item.type === 'folder' && isDescendant(dragId, targetId)) {
-    alert(t('selfNest'));
-    save();
-    return true;
-  }
-  d.parent.children.splice(d.parent.children.findIndex((x) => x.id === dragId), 1);
-  delete d.item.fx; delete d.item.fy; delete d.item.fw; delete d.item.fh;
-  t.item.children.push(d.item);
-  path = path.filter((pid) => findItem(pid));
-  save();
-  return true;
-}
-async function save() { await store.save(state); render(); }
-
-// ---------- погода (Open-Meteo, без ключа) ----------
-const wxMem = {};
-function wmoIcon(c) {
-  if (c === 0) return '☀';
-  if (c <= 2) return '⛅';
-  if (c === 3) return '☁';
-  if (c <= 48) return '🌫';
-  if (c <= 57) return '🌦';
-  if (c <= 67) return '🌧';
-  if (c <= 77) return '🌨';
-  if (c <= 82) return '🌦';
-  if (c <= 86) return '🌨';
-  return '⛈';
-}
-async function resolveCity(city) {
-  const key = city.trim().toLowerCase();
-  const g = state.geo[key];
-  if (g && (Date.now() - g.ts) < 30 * 864e5) return g;
-  const r = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=${lang() === 'ru' ? 'ru' : 'en'}&format=json`);
-  const j = await r.json();
-  if (!j.results || !j.results.length) throw new Error('no city');
-  const v = { lat: j.results[0].latitude, lon: j.results[0].longitude, name: j.results[0].name, ts: Date.now() };
-  state.geo[key] = v;
-  store.save(state);
-  return v;
-}
-async function loadWeather(w) {
-  const root = document.querySelector(`[data-wid="${w.id}"]`);
-  if (!root) return;
-  const showCur = w.showCurrent !== false;
-  const days = Math.min(7, Math.max(0, +w.days || 0));
-  const nH = Math.max(0, Math.round((+w.hours || 0) / 3));
-  const tEl = root.querySelector('.w-wtemp');
-  const iEl = root.querySelector('.w-wicon');
-  const cEl = root.querySelector('.w-wcity');
-  const hrs = root.querySelector('.w-hours');
-  const box = root.querySelector('.w-rows');
-  try {
-    if (!w.city || !w.city.trim()) {
-      if (tEl) tEl.textContent = '—';
-      if (cEl)       if (cEl) cEl.textContent = isEdit() ? t('setCity') : t('noCity');
-      return;
-    }
-    let mem = wxMem[w.id];
-    if (!mem || Date.now() - mem.t > 30 * 60e3 || mem.city !== w.city) {
-      const g = await resolveCity(w.city);
-      const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${g.lat}&longitude=${g.lon}&current=temperature_2m,weather_code&hourly=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=8`);
-      const j = await r.json();
-      mem = wxMem[w.id] = { t: Date.now(), city: w.city, name: g.name, j };
-    }
-    const { j, name } = mem;
-    if (showCur && tEl) {
-      tEl.textContent = `${Math.round(j.current.temperature_2m)}°`;
-      iEl.textContent = wmoIcon(j.current.weather_code);
-      cEl.textContent = name;
-    } else if (cEl && (nH || days)) {
-      cEl.textContent = name;
-    }
-    if (hrs) {
-      hrs.innerHTML = '';
-      if (nH > 0) {
-        const curH = j.current.time.slice(0, 13);
-        let si = j.hourly.time.findIndex((t) => t.slice(0, 13) >= curH);
-        if (si < 0) si = 0;
-        for (let k = 0; k < nH; k++) {
-          const i = si + k * 3;
-          if (i >= j.hourly.time.length) break;
-          const d = document.createElement('div');
-          d.className = 'w-hour';
-          const hh = document.createElement('span');
-          hh.className = 'hh';
-          hh.textContent = j.hourly.time[i].slice(11, 16);
-          const ii = document.createElement('span');
-          ii.textContent = wmoIcon(j.hourly.weather_code[i]);
-          const vv = document.createElement('span');
-          vv.className = 'hv';
-          vv.textContent = `${Math.round(j.hourly.temperature_2m[i])}°`;
-          d.append(hh, ii, vv);
-          hrs.appendChild(d);
-        }
-      }
-    }
-    if (box) {
-      box.innerHTML = '';
-      const start = showCur ? 1 : 0;
-      for (let k = 0; k < days; k++) {
-        const i = start + k;
-        if (i >= j.daily.time.length) break;
-        const day = new Date(j.daily.time[i] + 'T12:00:00').toLocaleDateString(loc(), { weekday: 'short' });
-        const row = document.createElement('div');
-        row.className = 'w-row';
-        const dEl = document.createElement('span');
-        dEl.className = 'd';
-        dEl.textContent = day;
-        const ic = document.createElement('span');
-        ic.textContent = wmoIcon(j.daily.weather_code[i]);
-        const v = document.createElement('span');
-        v.className = 'v';
-        v.textContent = `${Math.round(j.daily.temperature_2m_max[i])}° / ${Math.round(j.daily.temperature_2m_min[i])}°`;
-        row.append(dEl, ic, v);
-        box.appendChild(row);
-      }
-    }
-  } catch {
-    if (tEl) tEl.textContent = '—';
-  }
-}
-const QUOTES = [
-  ['Мы — то, что мы делаем постоянно. Совершенство — не действие, а привычка.', 'Аристотель'],
-  ['Начни там, где ты находишься. Используй то, что у тебя есть.', 'Артур Эш'],
-  ['Успех — это идти от неудачи к неудаче, не теряя энтузиазма.', 'У. Черчилль'],
-  ['Все, что ты можешь вообразить, — реально.', 'П. Пикассо'],
-  ['Лучшее время посадить дерево — двадцать лет назад. Второе лучшее — сейчас.', 'Пословица'],
-  ['Не откладывай на завтра то, что можно сделать сегодня.', 'Б. Франклин'],
-  ['Простота — залог надежности.', 'Э. Дейкстра'],
-  ['Сначала реши задачу. Затем напиши код.', 'Дж. Джонсон'],
-  ['Знание — сила.', 'Ф. Бэкон'],
-  ['Дорогу осилит идущий.', 'Пословица'],
-  ['Меньше, но лучше.', 'Дитер Рамс'],
-  ['Сделанное лучше идеального.', 'Принцип'],
-  ['Порядок освобождает мысль.', 'Принцип'],
-  ['Делай сегодня то, что другие не хотят, и завтра будешь жить так, как другие не могут.', 'Принцип'],
-  ['Единственный способ делать великие дела — любить то, что ты делаешь.', 'С. Джобс'],
-  ['Действие — ключ к успеху.', 'П. Пикассо'],
-];
-const QUOTES_EN = [
-  ['We are what we repeatedly do. Excellence, then, is not an act, but a habit.', 'Aristotle'],
-  ['Start where you are. Use what you have.', 'A. Ashe'],
-  ['Success is going from failure to failure without losing enthusiasm.', 'W. Churchill'],
-  ['Everything you can imagine is real.', 'P. Picasso'],
-  ['The best time to plant a tree was 20 years ago. The second best time is now.', 'Proverb'],
-  ['Never put off till tomorrow what you can do today.', 'B. Franklin'],
-  ['Simplicity is prerequisite for reliability.', 'E. Dijkstra'],
-  ['First, solve the problem. Then, write the code.', 'J. Johnson'],
-  ['Knowledge is power.', 'F. Bacon'],
-  ['Less, but better.', 'Dieter Rams'],
-  ['Done is better than perfect.', 'Principle'],
-  ['The only way to do great work is to love what you do.', 'S. Jobs'],
-  ['Action is the foundational key to all success.', 'P. Picasso'],
-  ['It always seems impossible until it is done.', 'N. Mandela'],
-  ['What we think, we become.', 'Buddha'],
-  ['Well begun is half done.', 'Proverb'],
-];
-function paintQuote(w, qEl, aEl) {
-  const arr = lang() === 'ru' ? QUOTES : QUOTES_EN;
-  const i = (Math.floor(Date.now() / 864e5) + (w.qoff || 0)) % arr.length;
-  const q = arr[(i + arr.length) % arr.length];
-  qEl.textContent = lang() === 'ru' ? '«' + q[0] + '»' : '"' + q[0] + '"';
-  aEl.textContent = '— ' + q[1];
-}
-
-const fxMem = {};
-const CUR_SYM = { USD: '$', EUR: '€', UAH: '₴', GBP: '£', PLN: 'zł', JPY: '¥', CNY: '¥', CHF: 'Fr', CZK: 'Kč', SEK: 'kr', CAD: '$', AUD: '$' };
-const CURRENCIES = ['USD', 'EUR', 'UAH', 'GBP', 'PLN', 'CHF', 'JPY', 'CNY', 'CZK', 'SEK', 'CAD', 'AUD'];
-const CUR_NAMES = {
-  ru: { USD: 'Доллар', EUR: 'Евро', UAH: 'Гривна', GBP: 'Фунт', PLN: 'Злотый', CHF: 'Франк', JPY: 'Иена', CNY: 'Юань', CZK: 'Крона', SEK: 'Крона', CAD: 'Доллар', AUD: 'Доллар' },
-  en: { USD: 'Dollar', EUR: 'Euro', UAH: 'Hryvnia', GBP: 'Pound', PLN: 'Zloty', CHF: 'Franc', JPY: 'Yen', CNY: 'Yuan', CZK: 'Koruna', SEK: 'Krona', CAD: 'Dollar', AUD: 'Dollar' },
-};
-const crMem = { t: 0, key: '', data: null };
-const COIN_IDS = { BTC: 'bitcoin', ETH: 'ethereum', SOL: 'solana', DOGE: 'dogecoin', XRP: 'ripple', ADA: 'cardano', TON: 'the-open-network', BNB: 'binancecoin', LTC: 'litecoin', TRX: 'tron', AVAX: 'avalanche-2', LINK: 'chainlink', DOT: 'polkadot', USDT: 'tether' };
-function parseCoins(s) {
-  return (s || '').toUpperCase().split(/[^A-Z]+/).filter(Boolean).slice(0, 8);
-}
-const fmtMoney = (n, d = 2) => (+n).toLocaleString('ru-RU', { maximumFractionDigits: d });
-
-// (подробный прогноз объединён с погодой — один гибкий виджет)
-
-async function loadCurrency(w) {
-  const root = document.querySelector(`[data-wid="${w.id}"]`);
-  if (!root) return;
-  const box = root.querySelector('.w-rows');
-  const base = ((w.base || 'UAH') + '').toUpperCase();
-  const syms = (Array.isArray(w.symbols) ? w.symbols : []).map((s) => (s + '').toUpperCase()).filter((s) => /^[A-Z]{3}$/.test(s)).slice(0, 6);
-  try {
-    let d = fxMem[base];
-    if (!d || Date.now() - d.t > 12 * 36e5) {
-      const r = await fetch(`https://open.er-api.com/v6/latest/${base}`);
-      const j = await r.json();
-      if (j.result !== 'success' || !j.rates) throw 0;
-      d = fxMem[base] = { t: Date.now(), rates: j.rates };
-      // суточный снапшот для дельты: ротируем не чаще раза в ~20 часов
-      state.fxHist = state.fxHist || {};
-      const hh = state.fxHist[base] || (state.fxHist[base] = {});
-      if (!hh.today || Date.now() - hh.today.ts > 20 * 36e5) {
-        if (hh.today) hh.prev = hh.today;
-        hh.today = { ts: Date.now(), rates: d.rates };
-        store.save(state); // тихо, без перерендера
-      }
-    }
-    box.innerHTML = '';
-    const h = (state.fxHist || {})[base] || {};
-    const prev = h.prev && h.prev.rates;
-    syms.forEach((s) => {
-      if (s === base || !d.rates[s]) return;
-      const cur = 1 / d.rates[s];
-      const row = document.createElement('div');
-      row.className = 'w-row';
-      const curEl = document.createElement('span');
-      curEl.textContent = `${CUR_SYM[s] || ''} ${s}`.trim();
-      const sp = document.createElement('span');
-      sp.className = 'd';
-      const val = document.createElement('span');
-      val.className = 'v';
-      val.textContent = `${fmtMoney(cur)} ${CUR_SYM[base] || base}`;
-      row.append(curEl, sp, val);
-      const p = prev && prev[s] ? 1 / prev[s] : null;
-      if (p) {
-        const pct = (cur - p) / p * 100;
-        const ch = document.createElement('span');
-        ch.className = pct > 0 ? 'up' : pct < 0 ? 'down' : '';
-        ch.textContent = `${pct > 0 ? '+' : ''}${Math.abs(pct).toFixed(1).replace('.', ',')}%`;
-        const dl = cur - p;
-        row.title = `${dl >= 0 ? '+' : ''}${fmtMoney(dl)} ${base}`;
-        val.append(' ', ch);
-      }
-      box.appendChild(row);
-    });
-    if (!box.children.length) box.innerHTML = `<div class="w-row"><span class="d">${t('noCurr')}</span></div>`;
-  } catch {
-    box.innerHTML = `<div class="w-row"><span class="d">${t('noConn')}</span></div>`;
-  }
-}
-
-async function loadCrypto(w) {
-  const root = document.querySelector(`[data-wid="${w.id}"]`);
-  if (!root) return;
-  const box = root.querySelector('.w-rows');
-  const syms = (Array.isArray(w.coins) ? w.coins : ['BTC', 'ETH']).map((s) => (s + '').toUpperCase()).filter(Boolean).slice(0, 8);
-  const ids = [...new Set(syms.map((s) => COIN_IDS[s] || s.toLowerCase()))];
-  try {
-    const key = ids.join(',');
-    if (!crMem.data || crMem.key !== key || Date.now() - crMem.t > 15 * 60e3) {
-      const r = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(key)}&vs_currencies=usd&include_24hr_change=true`);
-      crMem.data = await r.json();
-      crMem.key = key;
-      crMem.t = Date.now();
-    }
-    box.innerHTML = '';
-    syms.forEach((s) => {
-      const d = crMem.data[COIN_IDS[s] || s.toLowerCase()];
-      if (!d || typeof d.usd !== 'number') return;
-      const row = document.createElement('div');
-      row.className = 'w-row';
-      const cur = document.createElement('span');
-      cur.textContent = s;
-      const sp = document.createElement('span');
-      sp.className = 'd';
-      const val = document.createElement('span');
-      val.className = 'v';
-      val.textContent = `$${fmtMoney(Math.round(d.usd), 0)} `;
-      const ch = document.createElement('span');
-      ch.className = d.usd_24h_change >= 0 ? 'up' : 'down';
-      ch.textContent = `${d.usd_24h_change >= 0 ? '+' : ''}${String(d.usd_24h_change.toFixed(1)).replace('.', ',')}%`;
-      val.appendChild(ch);
-      row.append(cur, sp, val);
-      box.appendChild(row);
-    });
-    if (!box.children.length) box.innerHTML = `<div class="w-row"><span class="d">${t('noData')}</span></div>`;
-  } catch {
-    box.innerHTML = `<div class="w-row"><span class="d">${t('noConn')}</span></div>`;
-  }
-}
-
-function loadAllDynamic() {
-  state.board.forEach((x) => {
-    if (x.type === 'weather') loadWeather(x);
-    else if (x.type === 'currency') loadCurrency(x);
-    else if (x.type === 'crypto') loadCrypto(x);
-  });
-}
-setInterval(loadAllDynamic, 15 * 60e3);
-
-// ---------- рендер ----------
-function render() {
-  applyI18n();
-  const s = state.settings;
-  document.documentElement.dataset.theme = s.theme;
-  document.body.classList.toggle('editing', isEdit());
-
-  const grid = $('#grid');
-  grid.innerHTML = '';
-  $('#empty').hidden = state.board.length > 0;
-  state.board.forEach((w, i) => {
-    const el = widgetEl(w);
-    if (document.body.classList.contains('boot')) el.style.animationDelay = Math.min(i * 35, 400) + 'ms';
-    grid.appendChild(el);
-  });
-
-  const open = path.length > 0;
-  $('#folderView').hidden = !open;
-  if (open) renderFolder();
-
-  $('#clockBlock').style.display = s.showClock ? '' : 'none';
-  syncSettingsForm();
-  loadAllDynamic();
-}
-
-function renderFolder() {
-  const { list, folder } = getFolderByPath();
-  if (!folder) { path = []; render(); return; }
-  $('#folderTitle').textContent = folder.title;
-  $('#folderCount').textContent = list.length ? t('itemsCount', list.length) : t('emptyList');
-
-  const c = $('#folderCrumbs');
-  c.innerHTML = '';
-  c.style.display = path.length > 1 ? '' : 'none';
-  if (path.length > 1) {
-    let arr = state.board;
-    let first = true;
-    path.forEach((id, idx) => {
-      const f = arr.find((i) => i.id === id);
-      if (!f) return;
-      if (!first) {
-        const sep = document.createElement('span');
-        sep.textContent = '›';
-        c.appendChild(sep);
-      }
-      first = false;
-      if (idx === path.length - 1) {
-        const s = document.createElement('span');
-        s.className = 'cur';
-        s.textContent = f.title;
-        c.appendChild(s);
-      } else {
-        const b = document.createElement('button');
-        b.textContent = f.title;
-        b.title = t('crumbDrop');
-        b.onclick = () => { path = path.slice(0, idx + 1); render(); };
-        b.ondragover = (e) => { e.preventDefault(); b.classList.add('drop-target'); };
-        b.ondragleave = () => b.classList.remove('drop-target');
-        b.ondrop = (e) => { e.preventDefault(); e.stopPropagation(); b.classList.remove('drop-target'); moveItem(draggedId, id); };
-        c.appendChild(b);
-      }
-      arr = f.children;
-    });
-  }
-
-  const grid = $('#folderGrid');
-  grid.innerHTML = '';
-  $('#folderEmpty').hidden = list.length > 0;
-  list.forEach((it) => grid.appendChild(tileEl(it)));
-  grid.ondragover = (e) => e.preventDefault();
-  grid.ondrop = (e) => {
-    if (e.target !== grid) return;
-    const found = findItem(draggedId);
-    if (!found) return;
-    found.parent.children.splice(found.parent.children.findIndex((x) => x.id === draggedId), 1);
-    list.push(found.item);
-    save();
-  };
-}
-
-// ---------- форма настроек ----------
-function syncSettingsForm() {
+// ---------- фон ----------
+let bgShowA = true, bgTimer = 0;
+const bgLocal = (() => { try { return JSON.parse(localStorage.getItem('rdb2_bg') || '{}') || {}; } catch { return {}; } })();
+function bgLocalSave() { try { localStorage.setItem('rdb2_bg', JSON.stringify(bgLocal)); } catch {} }
+function bgUrls() {
   const b = state.settings.bg;
-  $('#sTheme').value = state.settings.theme;
-  $('#sClock').checked = state.settings.showClock;
-  $('#sLang').value = state.settings.lang || 'auto';
-  $('#sBgMode').value = b.mode;
-  $('#sBgInterval').value = String(b.intervalMin);
-  $('#sCustomUrls').value = (b.customUrls || []).join('\n');
-  $('#sBgValue').value = b.color || '';
-  $('#sBlur').value = b.blur; $('#blurVal').textContent = b.blur + 'px';
-  $('#sDim').value = b.dim; $('#dimVal').textContent = b.dim + '%';
-  $('#bgCuratedBox').hidden = !(b.mode === 'curated' || b.mode === 'custom');
-  $('#bgCustomBox').hidden = b.mode !== 'custom';
-  $('#bgUploadBox').hidden = b.mode !== 'upload';
-  $('#bgColorBox').hidden = !(b.mode === 'gradient' || b.mode === 'color');
-  const box = $('#bgPresets');
-  box.innerHTML = '';
-  PRESETS.forEach((p) => {
-    const btn = document.createElement('button');
-    btn.style.background = p;
-    if (b.color === p) btn.classList.add('active');
-    btn.onclick = () => { b.color = p; b.mode = p.startsWith('linear') ? 'gradient' : 'color'; saveBg(); };
-    box.appendChild(btn);
-  });
+  if (b.mode === 'custom') { const u = (b.urls || []).map((s) => s.trim()).filter(Boolean); return u.length ? u : R.CURATED; }
+  return R.CURATED;
 }
-function saveBg() { store.save(state); showBg(); syncSettingsForm(); }
-
-// создание и изменение ссылок, папок и виджетов — только через openWModal выше
-
-// ---------- модалка виджета ----------
-// единое меню: ссылка и папка — отдельно без выбора типа, тип — только для виджетов
-function openWModal(mode, widget = null, preset = null, showAll = false) {
-  wEditing = { mode, widget };
-  manualTitle = false; autoTitle = null;
-  if (titleCtl) { titleCtl.abort(); titleCtl = null; }
-  $('#wmodal').hidden = false;
-  const wtype = widget?.type || preset || 'note';
-  $('#wmodalTitle').textContent = mode === 'create'
-    ? (preset === 'link' ? t('wNewLink') : preset === 'folder' ? t('wNewFolder') : t('wNewWidget'))
-    : t('wEdit');
-  [...$('#wType').options].forEach((o) => {
-    if (mode !== 'create') o.hidden = o.value !== wtype;
-    else if (preset) o.hidden = true;
-    else if (path.length > 0 && !showAll) o.hidden = o.value !== 'link' && o.value !== 'folder';
-    else o.hidden = o.value === 'link' || o.value === 'folder';
-  });
-  $('#wTypeWrap').style.display = (mode === 'create' && !preset) ? '' : 'none';
-  $('#wType').disabled = mode !== 'create';
-  $('#wType').value = wtype;
-  $('#wTitle').value = widget?.title || '';
-  $('#wUrl').value = widget?.url || '';
-  $('#wCity').value = widget?.city || '';
-  $('#wCur').checked = widget?.showCurrent !== false;
-  $('#wDays').value = widget?.days ?? 3;
-  $('#wHours').value = widget?.hours ?? 0;
-  paintBase(widget?.base || 'UAH');
-  paintSyms(widget?.symbols || ['USD', 'EUR']);
-  $('#wCoins').value = (widget?.coins || ['BTC', 'ETH']).join(', ');
-  $('#wIconAuto').checked = !widget?.noicon;
-  $('#wIcon').value = widget?.icon || '';
-  $('#wFont').value = widget?.font || 'm';
-  syncWForm();
-  ($('#wCityWrap').style.display !== 'none' ? $('#wCity') : $('#wBaseWrap').style.display !== 'none' ? $('#wBase') : $('#wTitleWrap').style.display !== 'none' ? $('#wTitle') : $('#wType')).focus();
-}
-function closeWModal() { $('#wmodal').hidden = true; wEditing = null; if (titleCtl) { titleCtl.abort(); titleCtl = null; } }
-let manualTitle = false, autoTitle = null, titleCtl = null;
-(function initTitleAutofill() {
-  const urlEl = $('#wUrl'), titleEl = $('#wTitle');
-  let deb = null;
-  const schedule = (now) => {
-    clearTimeout(deb);
-    if (now) { tryAutofill(); return; }
-    deb = setTimeout(tryAutofill, 600);
-  };
-  urlEl.addEventListener('input', () => schedule(false));
-  urlEl.addEventListener('paste', () => setTimeout(() => schedule(true), 0));
-  urlEl.addEventListener('blur', tryAutofill);
-  titleEl.addEventListener('input', () => {
-    const v = titleEl.value;
-    manualTitle = v.trim() !== '' && v !== autoTitle;
-  });
-  $('#wType').addEventListener('change', () => { if ($('#wType').value !== 'link' && titleCtl) { titleCtl.abort(); titleCtl = null; } });
-})();
-async function tryAutofill() {
-  if ($('#wmodal').hidden) return;
-  if ($('#wType').value !== 'link' || $('#wUrlWrap').style.display === 'none') return;
-  const url = normalizeUrl($('#wUrl').value.trim());
-  if (!/^https?:\/\/.+\..+/.test(url)) return;
-  if (manualTitle) return;
-  const titleEl = $('#wTitle');
-  if (!titleEl.value.trim()) {
-    const host = prettyHost(url);
-    if (host) { titleEl.value = host; autoTitle = host; }
-  }
-  if (titleCtl) titleCtl.abort();
-  titleCtl = new AbortController();
-  const sig = titleCtl.signal;
-  const oldPh = titleEl.placeholder;
-  titleEl.placeholder = t('fetchingTitle');
-  try {
-    const fetched = await fetchTitle(url, sig);
-    if (!sig.aborted && fetched && !manualTitle && (titleEl.value.trim() === '' || titleEl.value === autoTitle)) {
-      titleEl.value = fetched;
-      autoTitle = fetched;
-    }
-  } finally {
-    if (!sig.aborted) titleEl.placeholder = oldPh;
-  }
-}
-function paintIconPrev() {
-  const prev = $('#wIconPrev');
-  const v = ($('#wIcon').value || '').trim();
-  if (!v || $('#wType').value !== 'link') { prev.hidden = true; prev.removeAttribute('src'); return; }
-  prev.hidden = false;
-  prev.onerror = () => { prev.hidden = true; };
-  if (prev.getAttribute('src') !== v) prev.src = v;
-}
-function syncWForm() {
-  const t = $('#wType').value;
-  $('#wTitleWrap').style.display = ['link', 'folder', 'note', 'checklist'].includes(t) ? '' : 'none';
-  $('#wUrlWrap').style.display = t === 'link' ? '' : 'none';
-  $('#wIconAutoWrap').style.display = t === 'link' ? '' : 'none';
-  $('#wIconWrap').style.display = t === 'link' ? '' : 'none';
-  const isW = t === 'weather';
-  $('#wCityWrap').style.display = isW ? '' : 'none';
-  $('#wCurWrap').style.display = isW ? '' : 'none';
-  $('#wDaysWrap').style.display = isW ? '' : 'none';
-  $('#wHoursWrap').style.display = isW ? '' : 'none';
-  const isCur = t === 'currency';
-  $('#wBaseWrap').style.display = isCur ? '' : 'none';
-  $('#wSymsWrap').style.display = isCur ? '' : 'none';
-  $('#wCoinsWrap').style.display = t === 'crypto' ? '' : 'none';
-  $('#wFontWrap').style.display = t === 'quote' ? '' : 'none';
-  paintIconPrev();
-}
-
-// ---------- контекстное меню (правая кнопка) ----------
-function closeCtx() { const m = $('#ctx'); if (m) m.hidden = true; }
-function openCtx(x, y, items) {
-  const m = $('#ctx');
-  m.innerHTML = '';
-  items.forEach((it) => {
-    if (it.sep) { const s = document.createElement('div'); s.className = 'sep'; m.appendChild(s); return; }
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.textContent = it.label;
-    if (it.danger) b.classList.add('danger');
-    b.onclick = (e) => { e.stopPropagation(); closeCtx(); if (it.fn) it.fn(); };
-    m.appendChild(b);
-  });
-  m.hidden = false;
-  const r = m.getBoundingClientRect();
-  m.style.left = Math.max(8, Math.min(x, window.innerWidth - r.width - 8)) + 'px';
-  m.style.top = Math.max(8, Math.min(y, window.innerHeight - r.height - 8)) + 'px';
-}
-async function copyText(t) {
-  try { await navigator.clipboard.writeText(t); }
-  catch {
-    const ta = document.createElement('textarea');
-    ta.value = t;
-    document.body.appendChild(ta);
-    ta.select();
-    try { document.execCommand('copy'); } catch {}
-    ta.remove();
-  }
-}
-function ctxDelete(item) {
-  const f = findItem(item.id);
-  if (!f) return;
-  const n = (item.children || []).length;
-  if (item.type === 'folder' && n && !confirm(t('delFolder', item.title, n))) return;
-  else if (item.type !== 'folder' && !confirm(t('delOne', item.title || t('untitled')))) return;
-  f.parent.children.splice(f.parent.children.findIndex((x) => x.id === item.id), 1);
-  path = path.filter((pid) => findItem(pid));
-  save();
-}
-function ctxItemsLink(item, nested) {
-  const items = [
-    { label: t('mOpen'), fn: () => window.open(item.url, '_blank') },
-    { label: t('mCopy'), fn: () => copyText(item.url) },
-    { label: t('mEdit'), fn: () => openWModal('edit', item) },
-  ];
-  if (nested) items.push({ label: t('mToBoard'), fn: () => moveToBoard(item.id) });
-  items.push({ sep: true }, { label: t('mDel'), danger: true, fn: () => ctxDelete(item) });
-  return items;
-}
-function ctxItemsFolder(item, nested, openFn) {
-  const items = [
-    { label: t('mOpen'), fn: openFn },
-    { label: t('mRename'), fn: () => openWModal('edit', item) },
-  ];
-  if (nested) items.push({ label: t('mToBoard'), fn: () => moveToBoard(item.id) });
-  items.push({ sep: true }, { label: t('mDel'), danger: true, fn: () => ctxDelete(item) });
-  return items;
-}
-function ctxItemsWidget(w) {
-  const items = [];
-  if (w.type === 'note' || w.type === 'checklist') items.push({ label: t('mRename'), fn: () => openWModal('edit', w) });
-  if (w.type === 'weather') items.push({ label: t('mSetupWeather'), fn: () => openWModal('edit', w) });
-  if (w.type === 'currency') items.push({ label: t('mSetupCurr'), fn: () => openWModal('edit', w) });
-  if (w.type === 'crypto') items.push({ label: t('mSetupCoins'), fn: () => openWModal('edit', w) });
-  if (items.length) items.push({ sep: true });
-  items.push({ label: t('mDel'), danger: true, fn: () => ctxDelete(w) });
-  return items;
-}
-document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#ctx')) closeCtx(); }, true);
-document.addEventListener('scroll', closeCtx, true);
-window.addEventListener('blur', closeCtx);
-
-// кастомные степперы −/+ для number-инпутов вместо нативных стрелок
-function enhanceNumbers() {
-  document.querySelectorAll('.card-modal input[type="number"], .drawer-body input[type="number"]').forEach((inp) => {
-    if (inp.closest('.num-step')) return;
-    const wrap = document.createElement('div');
-    wrap.className = 'num-step';
-    const minus = document.createElement('button');
-    minus.type = 'button';
-    minus.textContent = '−';
-    minus.title = '−';
-    const plus = document.createElement('button');
-    plus.type = 'button';
-    plus.textContent = '+';
-    plus.title = '+';
-    inp.before(wrap);
-    wrap.append(minus, inp, plus);
-    const step = (d) => {
-      if (d > 0) inp.stepUp();
-      else inp.stepDown();
-      inp.dispatchEvent(new Event('input', { bubbles: true }));
-      inp.dispatchEvent(new Event('change', { bubbles: true }));
-    };
-    const hold = (btn, d) => {
-      let t1 = null, t2 = null;
-      const stop = () => { clearTimeout(t1); clearInterval(t2); t1 = t2 = null; };
-      btn.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        step(d);
-        t1 = setTimeout(() => { t2 = setInterval(() => step(d), 70); }, 450);
-      });
-      ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => btn.addEventListener(ev, stop));
-    };
-    hold(minus, -1);
-    hold(plus, 1);
-  });
-}
-// ---------- события ----------
-$('#addBtn').onclick = () => openWModal('create');
-
-$('#wType').onchange = syncWForm;
-$('#wIcon').addEventListener('input', paintIconPrev);
-$('#wmodalCancel').onclick = closeWModal;
-$('#wmodal').addEventListener('mousedown', (e) => { if (e.target.id === 'wmodal') closeWModal(); });
-$('#wmodalForm').onsubmit = (e) => {
-  e.preventDefault();
-  const t = $('#wType').value;
-  const title = $('#wTitle').value.trim() || I18N[lang()].untitled;
-  if (wEditing.mode === 'edit') {
-    const w = wEditing.widget;
-    if (t !== 'link') delete w.url;
-    if (t !== 'weather' && t !== 'forecast') delete w.city;
-    if (t === 'link') { w.title = title; w.url = normalizeUrl($('#wUrl').value); const ci = ($('#wIcon').value || '').trim(); if (ci) w.icon = ci; else delete w.icon; if ($('#wIconAuto').checked) delete w.noicon; else w.noicon = true; }
-    else if (t === 'folder' || t === 'note' || t === 'checklist') { w.title = title; }
-    else if (t === 'weather') {
-      w.city = $('#wCity').value.trim() || '';
-      w.title = I18N[lang()].tWeather;
-      w.showCurrent = $('#wCur').checked;
-      w.days = Math.min(7, Math.max(0, +$('#wDays').value || 0));
-      w.hours = Math.min(24, Math.max(0, +$('#wHours').value || 0));
-      delete wxMem[w.id];
-    }
-    else if (t === 'currency') { w.base = $('#wBase').value || 'UAH'; const ps = getSyms(); w.symbols = ps.length ? ps : ['USD', 'EUR']; }
-    else if (t === 'crypto') { const cc = parseCoins($('#wCoins').value); w.coins = cc.length ? cc : ['BTC', 'ETH']; }
-    else if (t === 'quote') { w.font = $('#wFont').value || 'm'; }
-  } else {
-    const { list } = getFolderByPath();
-    const target = (list === state.board || t === 'link' || t === 'folder') ? list : state.board;
-    const r = target === state.board ? cascadeRect(t) : {};
-    if (t === 'link') {
-      const url = normalizeUrl($('#wUrl').value);
-      if (!url) return alert(t('needUrl'));
-      const ci0 = ($('#wIcon').value || '').trim();
-      target.push({ id: uid(), type: 'link', title, url, ...(ci0 ? { icon: ci0 } : {}), ...(!$('#wIconAuto').checked ? { noicon: true } : {}), ...r });
-    }
-    else if (t === 'folder') target.push({ id: uid(), type: 'folder', title, children: [], ...r });
-    else if (t === 'note') target.push({ id: uid(), type: 'note', title, text: '', ...r });
-    else if (t === 'checklist') target.push({ id: uid(), type: 'checklist', title, items: [], ...r });
-    else if (t === 'weather') target.push({ id: uid(), type: 'weather', title: I18N[lang()].tWeather, city: $('#wCity').value.trim(), showCurrent: $('#wCur').checked, days: Math.min(7, Math.max(0, +$('#wDays').value || 0)), hours: Math.min(24, Math.max(0, +$('#wHours').value || 0)), ...r });
-    else if (t === 'currency') { const cs = getSyms(); target.push({ id: uid(), type: 'currency', title: I18N[lang()].tCurrency, base: $('#wBase').value || 'UAH', symbols: cs.length ? cs : ['USD', 'EUR'], ...r }); }
-    else if (t === 'crypto') { const cc = parseCoins($('#wCoins').value); target.push({ id: uid(), type: 'crypto', title: I18N[lang()].tCrypto, coins: cc.length ? cc : ['BTC', 'ETH'], ...r }); }
-    else if (t === 'quote') target.push({ id: uid(), type: 'quote', title: I18N[lang()].tQuote, font: $('#wFont').value || 'm', ...r });
-  }
-  closeWModal(); save();
-};
-
-// окно папки
-// окно папки закрывается кликом за его пределами; + сверху — добавить закладку
-$('#folderAddBtn').onclick = () => openWModal('create', null, 'link');
-// клик по фону всегда закрывает папку: mousedown при настоящем drag-and-drop
-// на фон попасть не может (drag стартует с плитки), так что гард не нужен и не должен залипать
-$('#folderView').addEventListener('mousedown', (e) => { if (e.target.id === 'folderView') { path = []; render(); } });
-document.addEventListener('dragend', () => { draggedId = null; dropAfter = false; document.body.classList.remove('dragging'); });
-// страховка: если dragend потерялся, класс-подсказка не должен залипать
-document.addEventListener('pointerup', () => document.body.classList.remove('dragging'));
-// дроп на фон за пределами окна папки = вынести элемент на доску
-$('#folderView').addEventListener('dragover', (e) => { e.preventDefault(); });
-$('#folderView').addEventListener('drop', (e) => {
-  if (e.target.id !== 'folderView') return;
-  e.preventDefault();
-  moveToBoard(draggedId);
-});
-document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape') return;
-  if (!$('#ctx').hidden) { closeCtx(); return; }
-  if (!$('#wmodal').hidden) closeWModal();
-  else if (!$('#settingsModal').hidden) $('#settingsModal').hidden = true;
-  else if (path.length) { path = []; render(); }
-});
-
-$('#editToggle').onclick = () => {
-  document.body.dataset.edit = isEdit() ? '' : '1';
-  render();
-};
-$('#bgNextBtn').onclick = () => nextBg(1);
-$('#bgShuffleBtn').onclick = () => {
-  const list = bgList();
-  state.settings.bg.index = Math.floor(Math.random() * list.length);
-  state.settings.bg.lastChange = Date.now();
-  saveBg();
-};
-
-$('#settingsBtn').onclick = () => { syncSettingsForm(); $('#settingsModal').hidden = false; };
-$('#settingsBg').onclick = () => { $('#settingsModal').hidden = true; };
-$('#settingsSave').onclick = () => {
+async function showBg(force) {
   const b = state.settings.bg;
-  state.settings.theme = $('#sTheme').value;
-  state.settings.showClock = $('#sClock').checked;
-  state.settings.lang = $('#sLang').value;
-  b.mode = $('#sBgMode').value;
-  b.intervalMin = +$('#sBgInterval').value;
-  b.customUrls = $('#sCustomUrls').value.split('\n').map((s) => s.trim()).filter(Boolean);
-  if ($('#sBgValue').value.trim()) b.color = $('#sBgValue').value.trim();
-  b.blur = +$('#sBlur').value;
-  b.dim = +$('#sDim').value;
-  $('#settingsModal').hidden = true;
-  store.save(state); scheduleBg(); showBg(); render();
-};
-$('#sBlur').oninput = (e) => { state.settings.bg.blur = +e.target.value; $('#blurVal').textContent = e.target.value + 'px'; applyFilters(); };
-$('#sDim').oninput = (e) => { state.settings.bg.dim = +e.target.value; $('#dimVal').textContent = e.target.value + '%'; applyFilters(); };
-$('#sBlur').onchange = $('#sDim').onchange = () => store.save(state);
-$('#sBgMode').onchange = (e) => { state.settings.bg.mode = e.target.value; syncSettingsForm(); showBg(); };
-$('#sLang').onchange = (e) => { state.settings.lang = e.target.value; store.save(state); render(); };
+  $('#dim').style.background = `rgba(6,8,12,${b.dim / 100})`;
+  document.documentElement.style.setProperty('--bg-blur', b.blur + 'px');
+  const credit = $('#credit');
+  credit.hidden = true;
+  if (b.mode === 'color') return paintBg(b.color || R.BG_PRESETS[0], false);
+  if (b.mode === 'upload') { const f = await store.getBgFile(); return paintBg(f ? `url("${f}")` : R.BG_PRESETS[0], !!f); }
+  const list = bgUrls();
+  if (bgLocal.index == null) bgLocal.index = b.index || 0;
+  const iv = +b.interval;
+  const due = force || iv === 0 || (iv > 0 && Date.now() - (bgLocal.last || 0) > iv * 60e3);
+  if (due && (bgLocal.last || force || iv === 0)) bgLocal.index = (bgLocal.index + 1) % list.length;
+  if (due) { bgLocal.last = Date.now(); bgLocalSave(); }
+  const url = list[bgLocal.index % list.length];
+  if (b.mode === 'curated') {
+    credit.hidden = false;
+    credit.textContent = `${t('photo')}: Unsplash`;
+    credit.href = url.split('?')[0].replace('images.unsplash.com/photo-', 'unsplash.com/photos/');
+  }
+  // предзагрузка, чтобы фото не проявлялось полосами
+  const pre = new Image();
+  pre.onload = () => paintBg(`url("${url}")`, true);
+  pre.onerror = () => paintBg(R.BG_PRESETS[0], false);
+  pre.src = url;
+  clearTimeout(bgTimer);
+  if (iv > 0 && iv < 1440) bgTimer = setTimeout(() => showBg(true), iv * 60e3);
+}
+function paintBg(css, isImg) {
+  const a = $('#bgA'), b = $('#bgB');
+  const [show, hide] = bgShowA ? [b, a] : [a, b];
+  const put = (el) => { el.style.background = isImg ? '' : css; if (isImg) el.style.backgroundImage = css; };
+  if (document.body.classList.contains('booting')) { // первый кадр — без анимации
+    put(a); a.classList.add('on'); b.classList.remove('on'); bgShowA = true; return;
+  }
+  put(show);
+  show.classList.add('on'); hide.classList.remove('on');
+  bgShowA = !bgShowA;
+}
+function fileToDataUrl(file, maxDim = 1920, q = 0.86) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onerror = rej;
+    fr.onload = () => {
+      if (file.type === 'image/svg+xml') return res(fr.result);
+      const img = new Image();
+      img.onerror = rej;
+      img.onload = () => {
+        const k = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        res(maxDim <= 256 ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', q));
+      };
+      img.src = fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
 
-$('#sUpload').onchange = async (e) => {
-  const f = e.target.files[0];
-  if (!f) return;
-  try {
-    const dataUrl = await fileToDataUrl(f);
-    state.settings.bg.upload = dataUrl;
-    state.settings.bg.mode = 'upload';
-    saveBg();
-  } catch { alert(t('badFile')); }
-  e.target.value = '';
-};
-$('#uploadClear').onclick = () => { state.settings.bg.upload = ''; saveBg(); };
-
-$('#exportBtn').onclick = () => {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'desktop-backup.json';
-  a.click();
-};
-$('#importBtn').onclick = () => $('#importFile').click();
-$('#importFile').onchange = (e) => {
-  const f = e.target.files[0];
-  if (!f) return;
-  const r = new FileReader();
-  r.onload = () => {
-    try {
-      const data = migrate(JSON.parse(r.result));
-      if (!data.board || !data.settings) throw 0;
-      state = data; path = [];
-      store.save(state); scheduleBg(); showBg(); render();
-    } catch { alert(t('badBackup')); }
-  };
-  r.readAsText(f);
-  e.target.value = '';
-};
-$('#resetBtn').onclick = () => {
-  if (!confirm(t('resetConfirm'))) return;
-  state = defaultState(); path = [];
-  $('#settingsModal').hidden = true;
-  store.save(state); scheduleBg(); showBg(); render();
-};
-
+// ---------- шапка ----------
+const hour12 = (() => { try { return new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hour12; } catch { return false; } })();
+let lastDay = new Date().toDateString();
 function tick() {
   const now = new Date();
-  const lc = loc();
-  $('#clock').textContent = now.toLocaleTimeString(lc, { hour: '2-digit', minute: '2-digit' });
-  $('#date').textContent = now.toLocaleDateString(lc, { weekday: 'long', day: 'numeric', month: 'long' });
+  if (state && now.toDateString() !== lastDay) { lastDay = now.toDateString(); render(); }
+  state && state.groups.forEach((g) => { if (g.kind === 'clock' && !g.collapsed) { const el = $(`.w-load[data-wid="${g.id}"]`); if (el) wClock(g, el); } });
+  const loc = R.lang() === 'ru' ? 'ru-RU' : undefined;
+  $('#clock').textContent = now.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit', hour12 });
+  const hr = now.getHours();
+  const greet = t(hr < 5 ? 'night' : hr < 12 ? 'morning' : hr < 18 ? 'day' : hr < 23 ? 'evening' : 'night');
+  const date = now.toLocaleDateString(loc, { weekday: 'long', day: 'numeric', month: 'long' });
+  const name = (state.settings.name || '').trim();
+  $('#hello').textContent = `${date[0].toUpperCase() + date.slice(1)} · ${greet}${name ? ', ' + name : ''}`;
 }
-setInterval(tick, 5000);
-tick();
 
-let winT = null;
-window.addEventListener('resize', () => {
-  clearTimeout(winT);
-  winT = setTimeout(() => {
-    const a = document.activeElement;
-    if (a && a.closest && a.closest('.widget') && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT')) return;
-    render();
-  }, 300);
-});
-// правая кнопка по пустому месту: выпадающий список создания
-$('#grid').addEventListener('contextmenu', (e) => {
+// ---------- раскладка ----------
+function applySettings() {
+  const s = state.settings;
+  R.setLang(s.lang);
+  document.documentElement.lang = R.lang();
+  const root = document.documentElement.style;
+  root.setProperty('--accent', s.accent);
+  document.body.dataset.density = s.density;
+  document.body.dataset.maxw = s.maxw;
+  document.body.classList.toggle('locked', !!s.lock);
+  document.body.classList.toggle('no-desc', !s.showDesc);
+  $('#clockWrap').hidden = !s.showClock;
+  $('#searchWrap').hidden = !s.showSearch;
+  $('#top').hidden = !s.showClock;
+  $('#search').placeholder = t('search');
+  $('#searchIc').innerHTML = svg('search');
+  $('#addBtn').innerHTML = svg('plus'); $('#addBtn').title = t('add');
+  $('#settingsBtn').innerHTML = svg('gear'); $('#settingsBtn').title = t('settings');
+  $('#emptyTitle').textContent = t('emptyBoard');
+  $('#emptyHint').textContent = t('emptyHint');
+}
+function computeCols() {
+  const w = $('#grid').clientWidth || window.innerWidth;
+  const auto = clamp(Math.floor((w + 16) / (state.settings.density === 'compact' ? 270 : 310)), 1, 6);
+  cols = state.settings.cols ? Math.min(state.settings.cols, Math.max(1, Math.floor((w + 16) / 200))) : auto;
+  $('#grid').style.setProperty('--cols', cols);
+}
+// упаковка в стиле masonry: строки по 4px, каждая карточка занимает столько, сколько её высота
+const ROW = 4, GAP = 16;
+function packCard(card) {
+  const inner = card.firstElementChild;
+  if (!inner) return;
+  const hgt = inner.getBoundingClientRect().height;
+  card.style.gridRowEnd = 'span ' + Math.max(1, Math.ceil((hgt + GAP) / ROW));
+}
+const ro = new ResizeObserver((entries) => entries.forEach((e) => packCard(e.target.parentElement)));
+window.addEventListener('resize', () => { const c = cols; computeCols(); if (c !== cols) render(); });
+
+function render() {
+  const grid = $('#grid');
+  ro.disconnect();
+  computeCols();
+  grid.replaceChildren(...state.groups.map(groupEl));
+  grid.querySelectorAll('.card').forEach((c) => { packCard(c); ro.observe(c.firstElementChild); });
+  $('#emptyBoard').hidden = state.groups.length > 0;
+  loadWidgets();
+}
+
+// ---------- группы ----------
+function groupEl(g) {
+  const span = g.span >= 4 ? cols : Math.min(g.span || 1, cols);
+  const card = h('section', { class: `card k-${g.kind}` + (g.collapsed ? ' collapsed' : ''), 'data-gid': g.id, style: { gridColumn: `span ${span}` } });
+  const inner = h('div', { class: 'card-in' });
+  const head = h('header', { class: 'card-head', draggable: !state.settings.lock },
+    h('button', { class: 'card-title', text: g.title || t('k' + g.kind[0].toUpperCase() + g.kind.slice(1)), title: g.collapsed ? t('expand') : t('collapse'),
+      onclick: () => { g.collapsed = !g.collapsed; save(); } }),
+    h('span', { class: 'card-tools' },
+      g.kind === 'links' ? h('button', { class: 'tool', title: t('addLink'), html: svg('plus'), onclick: () => openLinkDialog({ groupId: g.id }) }) : null,
+      h('button', { class: 'tool', title: t('edit'), html: svg('dots'), onclick: (e) => openMenu(e.currentTarget, groupMenu(g)) })));
+  head.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); openMenuAt(e.clientX, e.clientY, groupMenu(g)); });
+  head.addEventListener('dragstart', (e) => { if (state.settings.lock) return e.preventDefault(); drag = { type: 'group', id: g.id }; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/x-rdb', g.id); card.classList.add('dragging'); });
+  head.addEventListener('dragend', () => { card.classList.remove('dragging'); clearDrop(); drag = null; });
+  const body = h('div', { class: 'card-body' });
+  if (!g.collapsed) {
+    if (g.kind === 'links') linksBody(g, body);
+    else if (g.kind === 'note') noteBody(g, body);
+    else if (g.kind === 'todo') todoBody(g, body);
+    else body.append(h('div', { class: 'w-load', 'data-wid': g.id }, h('span', { class: 'spinner' })));
+  }
+  inner.append(head, body);
+  card.append(inner);
+  card.addEventListener('dragover', (e) => onDragOver(e, g, card));
+  card.addEventListener('dragleave', (e) => { if (!card.contains(e.relatedTarget)) clearDrop(); });
+  card.addEventListener('drop', (e) => onDrop(e, g, card));
+  return card;
+}
+function groupMenu(g) {
+  const i = state.groups.indexOf(g);
+  const items = [];
+  if (g.kind === 'links') {
+    items.push({ icon: 'plus', label: t('addLink'), run: () => openLinkDialog({ groupId: g.id }) });
+    items.push({ sep: true });
+    items.push({ icon: 'tiles', label: t('vTiles'), checked: g.view === 'tiles', run: () => { g.view = 'tiles'; save(); } });
+    items.push({ icon: 'list', label: t('vList'), checked: g.view === 'list', run: () => { g.view = 'list'; save(); } });
+    items.push({ icon: 'compact', label: t('vCompact'), checked: g.view === 'compact', run: () => { g.view = 'compact'; save(); } });
+    items.push({ sep: true });
+  }
+  items.push({ icon: 'edit', label: t('edit'), run: () => openGroupDialog({ group: g }) });
+  if (i > 0) items.push({ icon: 'up', label: t('moveUp'), run: () => { state.groups.splice(i, 1); state.groups.splice(i - 1, 0, g); save(); } });
+  if (i < state.groups.length - 1) items.push({ icon: 'down', label: t('moveDown'), run: () => { state.groups.splice(i, 1); state.groups.splice(i + 1, 0, g); save(); } });
+  items.push({ icon: 'trash', label: t('del'), danger: true, run: () => removeGroup(g) });
+  return items;
+}
+function removeGroup(g) {
+  const i = state.groups.indexOf(g);
+  if (i < 0) return;
+  state.groups.splice(i, 1);
+  save();
+  toast(t('deleted') + ': ' + (g.title || t('k' + g.kind[0].toUpperCase() + g.kind.slice(1))), t('undo'), () => { state.groups.splice(i, 0, g); save(); });
+}
+
+// ---------- закладки ----------
+function linksBody(g, body) {
+  const list = h('div', { class: 'links v-' + g.view });
+  g.items.forEach((l) => list.append(linkEl(l, g)));
+  if (!g.items.length) list.append(h('button', { class: 'links-empty', text: t('emptyGroup'), onclick: () => openLinkDialog({ groupId: g.id }) }));
+  body.append(list);
+}
+function linkEl(l, g) {
+  const a = h('a', { class: 'lnk', href: l.url, 'data-lid': l.id, draggable: !state.settings.lock, title: l.url });
+  if (state.settings.newTab) { a.target = '_blank'; a.rel = 'noopener'; }
+  a.append(iconBox(l));
+  const txt = h('span', { class: 'lnk-txt' }, h('span', { class: 'lnk-title', text: l.title }));
+  if (l.desc && g.view === 'list') txt.append(h('span', { class: 'lnk-desc', text: l.desc }));
+  a.append(txt);
+  if (busyMeta.has(l.id)) a.classList.add('loading');
+  a.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); openMenuAt(e.clientX, e.clientY, linkMenu(l, g)); });
+  a.addEventListener('dragstart', (e) => {
+    if (state.settings.lock) return e.preventDefault();
+    drag = { type: 'link', id: l.id };
+    e.dataTransfer.effectAllowed = 'copyMove';
+    e.dataTransfer.setData('text/uri-list', l.url);
+    e.dataTransfer.setData('text/plain', l.url);
+    e.dataTransfer.setData('text/x-rdb', l.id);
+    requestAnimationFrame(() => a.classList.add('dragging'));
+  });
+  a.addEventListener('dragend', () => { a.classList.remove('dragging'); clearDrop(); drag = null; });
+  return a;
+}
+function linkMenu(l, g) {
+  const others = linkGroups().filter((x) => x !== g);
+  return [
+    { icon: 'ext', label: t('openNew'), run: () => window.open(l.url, '_blank', 'noopener') },
+    { icon: 'edit', label: t('edit'), run: () => openLinkDialog({ link: l }) },
+    { icon: 'copy', label: t('copy'), run: () => navigator.clipboard.writeText(l.url).catch(() => {}) },
+    others.length ? { icon: 'move', label: t('moveTo'), sub: others.map((o) => ({ label: o.title || t('untitled'), run: () => moveLink(l.id, o.id) })) } : null,
+    { sep: true },
+    { icon: 'trash', label: t('del'), danger: true, run: () => removeLink(l.id) },
+  ].filter(Boolean);
+}
+function moveLink(id, toGid, beforeId) {
+  const f = findLink(id);
+  const to = findGroup(toGid);
+  if (!f || !to || to.kind !== 'links') return;
+  f.g.items.splice(f.i, 1);
+  let at = beforeId ? to.items.findIndex((x) => x.id === beforeId) : -1;
+  if (at < 0) at = to.items.length;
+  to.items.splice(at, 0, f.l);
+  save();
+}
+function removeLink(id) {
+  const f = findLink(id);
+  if (!f) return;
+  f.g.items.splice(f.i, 1);
+  save();
+  toast(t('deleted') + ': ' + f.l.title, t('undo'), () => { const g = findGroup(f.g.id); if (g) { g.items.splice(f.i, 0, f.l); save(); } });
+}
+// добавить ссылку «в один клик»: сразу кладём, название/описание подтягиваем следом
+function quickAdd(url, groupId, extra = {}) {
+  url = R.normalizeUrl(url);
+  if (!url) return null;
+  const g = ensureLinkGroup(groupId);
+  const l = { id: uid(), url, title: (extra.title && R.cleanTitle(extra.title, url)) || R.titleFromUrl(url) };
+  if (extra.fav && /^https?:/.test(extra.fav)) l.fav = extra.fav;
+  g.items.push(l);
+  save();
+  enrich(l, !extra.title);
+  return { l, g };
+}
+async function enrich(l, wantTitle) {
+  const guessed = R.titleFromUrl(l.url);
+  busyMeta.add(l.id);
+  const m = await R.fetchMeta(l.url);
+  busyMeta.delete(l.id);
+  const f = findLink(l.id);
+  if (!f) return;
+  let changed = false;
+  if (m && m.title && wantTitle && f.l.title === guessed && !R.guessApp(l.url, '')) { f.l.title = m.title; changed = true; }
+  if (m && m.desc && !f.l.desc) { f.l.desc = m.desc; changed = true; }
+  if (changed) save(); else render();
+}
+
+// ---------- заметка и дела ----------
+function noteBody(g, body) {
+  const ta = h('textarea', { class: 'note', placeholder: t('notePh'), value: g.text || '', spellcheck: false });
+  const fit = () => { ta.style.height = 'auto'; ta.style.height = Math.min(600, ta.scrollHeight + 2) + 'px'; };
+  ta.addEventListener('input', () => { g.text = ta.value; fit(); save(false); });
+  requestAnimationFrame(fit);
+  body.append(ta);
+}
+// plaintext-only есть не во всех версиях Firefox — тогда обычный contenteditable
+function editable(el) {
+  if (state.settings.lock) return el;
+  try { el.contentEditable = 'plaintext-only'; } catch { el.contentEditable = 'true'; }
+  return el;
+}
+function todoBody(g, body) {
+  const ul = h('ul', { class: 'todo' });
+  g.items.forEach((it) => {
+    const li = h('li', { class: it.done ? 'done' : '' },
+      h('button', { class: 'chk', html: it.done ? svg('check') : '', onclick: () => { it.done = !it.done; save(); } }),
+      editable(h('span', { class: 'todo-txt', text: it.text,
+        onblur: (e) => { const v = e.target.textContent.trim(); if (v !== it.text) { if (v) it.text = v; else g.items.splice(g.items.indexOf(it), 1); save(); } },
+        onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } } })),
+      h('button', { class: 'todo-del', html: svg('x'), onclick: () => { g.items.splice(g.items.indexOf(it), 1); save(); } }));
+    ul.append(li);
+  });
+  const inp = h('input', { class: 'todo-add', placeholder: t('todoPh'),
+    onkeydown: (e) => { if (e.key === 'Enter' && inp.value.trim()) { g.items.push({ id: uid(), text: inp.value.trim(), done: false }); save(); requestAnimationFrame(() => $(`[data-gid="${g.id}"] .todo-add`)?.focus()); } } });
+  body.append(ul, inp);
+}
+
+// ---------- виджеты ----------
+const WMO = (c) => c === 0 ? '☀️' : c <= 2 ? '🌤️' : c === 3 ? '☁️' : c <= 48 ? '🌫️' : c <= 57 ? '🌦️' : c <= 67 ? '🌧️' : c <= 77 ? '🌨️' : c <= 82 ? '🌧️' : c <= 86 ? '🌨️' : '⛈️';
+const fresh = (rec, min) => rec && Date.now() - rec.t < min * 60e3;
+function loadWidgets() {
+  state.groups.forEach((g) => {
+    if (g.collapsed) return;
+    const el = $(`.w-load[data-wid="${g.id}"]`);
+    if (!el) return;
+    const fn = { weather: wWeather, currency: wCurrency, crypto: wCrypto, clock: wClock, calendar: wCalendar, countdown: wCountdown,
+      rss: wRss, iframe: wIframe, github: wGithub, topsites: wTopsites }[g.kind];
+    if (fn) fn(g, el).catch((e) => { console.warn(e); el.replaceChildren(h('div', { class: 'w-msg', text: t('err') })); });
+  });
+}
+async function geocode(city) {
+  const k = city.trim().toLowerCase();
+  if (cache.c.geo[k]) return cache.c.geo[k];
+  const r = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=${R.lang()}&format=json`);
+  const j = await r.json();
+  if (!j.results || !j.results.length) throw new Error('city');
+  const v = { lat: j.results[0].latitude, lon: j.results[0].longitude, name: j.results[0].name };
+  cache.c.geo[k] = v; cache.save();
+  return v;
+}
+async function wWeather(g, el) {
+  if (!(g.city || '').trim()) { el.replaceChildren(h('button', { class: 'w-msg link', text: t('noCity'), onclick: () => openGroupDialog({ group: g }) })); return; }
+  const geo = await geocode(g.city);
+  const ck = `${geo.lat},${geo.lon}`;
+  let rec = cache.c.wx[ck];
+  if (!fresh(rec, 30)) {
+    const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${geo.lat}&longitude=${geo.lon}&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,relative_humidity_2m&hourly=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=8`);
+    rec = { t: Date.now(), d: await r.json() };
+    cache.c.wx[ck] = rec; cache.save();
+  }
+  const d = rec.d, cur = d.current;
+  const loc = R.lang() === 'ru' ? 'ru-RU' : undefined;
+  const nowRow = h('div', { class: 'wx-now' },
+    h('span', { class: 'wx-ic', text: WMO(cur.weather_code) }),
+    h('span', { class: 'wx-t', text: Math.round(cur.temperature_2m) + '°' }),
+    h('span', { class: 'wx-meta' },
+      h('b', { text: geo.name }),
+      h('span', { text: `${R.lang() === 'ru' ? 'ощущ.' : 'feels'} ${Math.round(cur.apparent_temperature)}° · ${Math.round(cur.wind_speed_10m)} ${R.lang() === 'ru' ? 'км/ч' : 'km/h'} · ${cur.relative_humidity_2m}%` })));
+  const out = [nowRow];
+  const hours = clamp(+g.hours || 0, 0, 24);
+  if (hours) {
+    const start = d.hourly.time.findIndex((x) => new Date(x) > new Date());
+    const row = h('div', { class: 'wx-row' });
+    for (let i = start; i < start + hours && i < d.hourly.time.length; i += 3) {
+      row.append(h('div', { class: 'wx-cell' }, h('span', { text: new Date(d.hourly.time[i]).toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit', hour12 }) }),
+        h('span', { class: 'wx-ci', text: WMO(d.hourly.weather_code[i]) }), h('b', { text: Math.round(d.hourly.temperature_2m[i]) + '°' })));
+    }
+    out.push(row);
+  }
+  const days = clamp(+g.days || 0, 0, 7);
+  if (days) {
+    const row = h('div', { class: 'wx-row' });
+    for (let i = 1; i <= days && i < d.daily.time.length; i++) {
+      row.append(h('div', { class: 'wx-cell' }, h('span', { text: new Date(d.daily.time[i] + 'T12:00').toLocaleDateString(loc, { weekday: 'short' }) }),
+        h('span', { class: 'wx-ci', text: WMO(d.daily.weather_code[i]) }),
+        h('b', { text: Math.round(d.daily.temperature_2m_max[i]) + '°' }), h('small', { text: Math.round(d.daily.temperature_2m_min[i]) + '°' })));
+    }
+    out.push(row);
+  }
+  el.replaceChildren(...out);
+}
+const CUR_SYM = { USD: '$', EUR: '€', UAH: '₴', GBP: '£', PLN: 'zł', JPY: '¥', CNY: '¥', CHF: '₣', CZK: 'Kč', RUB: '₽', KZT: '₸', TRY: '₺', GEL: '₾' };
+const CURRENCIES = ['USD', 'EUR', 'UAH', 'RUB', 'GBP', 'PLN', 'CHF', 'JPY', 'CNY', 'CZK', 'SEK', 'NOK', 'CAD', 'AUD', 'KZT', 'TRY', 'GEL', 'BYN', 'ILS', 'INR'];
+async function wCurrency(g, el) {
+  const base = g.base || 'USD';
+  let rec = cache.c.fx[base];
+  if (!fresh(rec, 180)) {
+    const r = await fetch(`https://open.er-api.com/v6/latest/${base}`);
+    const j = await r.json();
+    if (j.result !== 'success') throw new Error('fx');
+    rec = { t: Date.now(), rates: j.rates };
+    cache.c.fx[base] = rec;
+  }
+  // вчерашние значения — для стрелки изменения
+  const today = new Date().toISOString().slice(0, 10);
+  const hist = cache.c.fxHist[base] || (cache.c.fxHist[base] = {});
+  const rows = (g.symbols || []).filter((s) => s !== base && rec.rates[s]).map((s) => {
+    const v = 1 / rec.rates[s];
+    const hs = hist[s] || (hist[s] = {});
+    if (!hs[today]) { hs[today] = v; Object.keys(hs).sort().slice(0, -3).forEach((k) => delete hs[k]); }
+    const prevDay = Object.keys(hs).sort().filter((k) => k < today).pop();
+    const diff = prevDay ? v - hs[prevDay] : 0;
+    return h('div', { class: 'kv' }, h('span', { class: 'kv-k', text: s }),
+      h('span', { class: 'kv-v', text: v.toLocaleString(undefined, { maximumFractionDigits: v < 1 ? 4 : 2, minimumFractionDigits: 2 }) + ' ' + (CUR_SYM[base] || base) }),
+      h('span', { class: 'kv-d ' + (diff > 0 ? 'up' : diff < 0 ? 'down' : ''), text: diff ? (diff > 0 ? '▲' : '▼') : '' }));
+  });
+  cache.save();
+  el.replaceChildren(...(rows.length ? rows : [h('div', { class: 'w-msg', text: '—' })]));
+}
+const COIN_IDS = { BTC: 'bitcoin', ETH: 'ethereum', SOL: 'solana', DOGE: 'dogecoin', XRP: 'ripple', ADA: 'cardano', TON: 'the-open-network', BNB: 'binancecoin',
+  LTC: 'litecoin', TRX: 'tron', AVAX: 'avalanche-2', LINK: 'chainlink', DOT: 'polkadot', USDT: 'tether', USDC: 'usd-coin', XMR: 'monero', ATOM: 'cosmos', NEAR: 'near', SUI: 'sui' };
+async function wCrypto(g, el) {
+  const coins = (g.coins || []).map((c) => c.trim()).filter(Boolean);
+  const ids = coins.map((c) => COIN_IDS[c.toUpperCase()] || c.toLowerCase());
+  const key = ids.join(',');
+  let rec = cache.c.cr[key];
+  if (!fresh(rec, 10)) {
+    const r = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(key)}&vs_currencies=usd&include_24hr_change=true`);
+    rec = { t: Date.now(), d: await r.json() };
+    cache.c.cr[key] = rec; cache.save();
+  }
+  el.replaceChildren(...coins.map((c, i) => {
+    const v = rec.d[ids[i]];
+    if (!v) return h('div', { class: 'kv' }, h('span', { class: 'kv-k', text: c.toUpperCase() }), h('span', { class: 'kv-v', text: '—' }));
+    const ch = v.usd_24h_change || 0;
+    return h('div', { class: 'kv' }, h('span', { class: 'kv-k', text: c.toUpperCase() }),
+      h('span', { class: 'kv-v', text: '$' + v.usd.toLocaleString(undefined, { maximumFractionDigits: v.usd < 10 ? 4 : 0 }) }),
+      h('span', { class: 'kv-d ' + (ch >= 0 ? 'up' : 'down'), text: (ch >= 0 ? '+' : '') + ch.toFixed(1) + '%' }));
+  }));
+}
+
+
+// ---------- новые виджеты ----------
+const locale = () => (R.lang() === 'ru' ? 'ru-RU' : undefined);
+function relTime(date) {
+  const diff = (date - Date.now()) / 1000;
+  const rtf = new Intl.RelativeTimeFormat(locale(), { numeric: 'auto', style: 'short' });
+  const a = Math.abs(diff);
+  if (a < 3600) return rtf.format(Math.round(diff / 60), 'minute');
+  if (a < 86400) return rtf.format(Math.round(diff / 3600), 'hour');
+  if (a < 86400 * 30) return rtf.format(Math.round(diff / 86400), 'day');
+  if (a < 86400 * 365) return rtf.format(Math.round(diff / (86400 * 30)), 'month');
+  return rtf.format(Math.round(diff / (86400 * 365)), 'year');
+}
+// «Киев=Europe/Kyiv» или просто «Europe/Kyiv»
+function parseZone(z) {
+  const [a, b] = z.includes('=') ? z.split('=') : [null, z];
+  const tz = (b || '').trim();
+  try { new Intl.DateTimeFormat('en', { timeZone: tz }); } catch { return null; }
+  return { tz, label: (a || tz.split('/').pop().replace(/_/g, ' ')).trim() };
+}
+function tzOffsetMin(tz, d) {
+  const p = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' })
+    .formatToParts(d).reduce((o, x) => (o[x.type] = x.value, o), {});
+  return (Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute) - Math.floor(d.getTime() / 60000) * 60000) / 60000;
+}
+async function wClock(g, el) {
+  const now = new Date();
+  const local = -now.getTimezoneOffset();
+  const rows = (g.zones || []).map(parseZone).filter(Boolean).map((z) => {
+    const diff = (tzOffsetMin(z.tz, now) - local) / 60;
+    const day = now.toLocaleDateString(locale(), { timeZone: z.tz, weekday: 'short' });
+    const sameDay = day === now.toLocaleDateString(locale(), { weekday: 'short' });
+    return h('div', { class: 'kv clock-row' }, h('span', { class: 'kv-k2', text: z.label }),
+      h('span', { class: 'kv-v big', text: now.toLocaleTimeString(locale(), { timeZone: z.tz, hour: '2-digit', minute: '2-digit', hour12 }) }),
+      h('span', { class: 'kv-d', text: (sameDay ? '' : day + ' ') + (diff ? (diff > 0 ? '+' : '') + (Number.isInteger(diff) ? diff : diff.toFixed(1)) + (R.lang() === 'ru' ? ' ч' : 'h') : '') }));
+  });
+  el.replaceChildren(...(rows.length ? rows : [h('button', { class: 'w-msg link', text: t('zones'), onclick: () => openGroupDialog({ group: g }) })]));
+}
+const calShift = {};
+async function wCalendar(g, el) {
+  const now = new Date();
+  const shift = calShift[g.id] || 0;
+  const m = new Date(now.getFullYear(), now.getMonth() + shift, 1);
+  const monStart = R.lang() === 'ru' || !/^en-US/.test(navigator.language);
+  const first = (m.getDay() + (monStart ? 6 : 0)) % 7;
+  const daysIn = new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate();
+  const title = m.toLocaleDateString(locale(), { month: 'long', year: 'numeric' });
+  const go = (d) => { calShift[g.id] = shift + d; wCalendar(g, el); };
+  const head = h('div', { class: 'cal-head' },
+    h('button', { class: 'tool', html: svg('left'), onclick: () => go(-1) }),
+    h('button', { class: 'cal-title', text: title[0].toUpperCase() + title.slice(1), onclick: () => { calShift[g.id] = 0; wCalendar(g, el); } }),
+    h('button', { class: 'tool', html: svg('right'), onclick: () => go(1) }));
+  const grid = h('div', { class: 'cal' });
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(2024, 0, (monStart ? 1 : 7) + i); // 1 янв 2024 — понедельник
+    grid.append(h('span', { class: 'cal-wd', text: d.toLocaleDateString(locale(), { weekday: 'short' }).slice(0, 2) }));
+  }
+  for (let i = 0; i < first; i++) grid.append(h('span'));
+  for (let d = 1; d <= daysIn; d++) {
+    const isToday = shift === 0 && d === now.getDate();
+    const wd = (first + d - 1) % 7;
+    grid.append(h('span', { class: 'cal-d' + (isToday ? ' today' : '') + ((monStart ? wd >= 5 : wd === 0 || wd === 6) ? ' we' : ''), text: d }));
+  }
+  el.replaceChildren(head, grid);
+}
+async function wCountdown(g, el) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const evs = (g.events || []).map((e) => ({ ...e, d: new Date(e.date + 'T00:00') })).filter((e) => !isNaN(e.d))
+    .map((e) => ({ ...e, left: Math.round((e.d - today) / 864e5) }))
+    .sort((a, b) => (a.left < 0) - (b.left < 0) || Math.abs(a.left) - Math.abs(b.left));
+  if (!evs.length) { el.replaceChildren(h('button', { class: 'w-msg link', text: t('noEvents'), onclick: () => openGroupDialog({ group: g }) })); return; }
+  el.replaceChildren(...evs.map((e) => h('div', { class: 'cd' + (e.left < 0 ? ' past' : '') },
+    h('span', { class: 'cd-n', text: e.left === 0 ? '🎉' : Math.abs(e.left) }),
+    h('span', { class: 'cd-t' }, h('b', { text: e.title }),
+      h('small', { text: e.left === 0 ? t('today') : e.d.toLocaleDateString(locale(), { day: 'numeric', month: 'long', year: e.d.getFullYear() !== today.getFullYear() ? 'numeric' : undefined }) + (e.left < 0 ? ' · ' + t('passed') : '') })))));
+}
+// доступ к чужим сайтам — только по запросу и только к нужному
+function originOf(url) { const u = R.parseUrl(url); return u ? u.origin + '/*' : null; }
+async function hasOrigin(url) {
+  const o = originOf(url);
+  try { return !!(o && ext && ext.permissions && await ext.permissions.contains({ origins: [o] })); } catch { return false; }
+}
+function askOrigin(url) { const o = originOf(url); return o && ext && ext.permissions ? ext.permissions.request({ origins: [o] }).catch(() => false) : Promise.resolve(false); }
+function grantBtn(url, g, el, fn) {
+  return h('div', { class: 'grant' }, h('span', { class: 'w-msg', text: t('needAccess', (R.parseUrl(url) || {}).hostname || url) }),
+    h('button', { class: 'btn ghost sm', text: t('grant'), onclick: async () => { if (await askOrigin(url)) fn(g, el); } }));
+}
+async function wRss(g, el) {
+  if (!g.feed) { el.replaceChildren(h('button', { class: 'w-msg link', text: t('feed'), onclick: () => openGroupDialog({ group: g }) })); return; }
+  let rec = cache.c.rss && cache.c.rss[g.feed];
+  if (!fresh(rec, 30)) {
+    if (!await hasOrigin(g.feed)) { el.replaceChildren(grantBtn(g.feed, g, el, wRss)); return; }
+    const txt = await (await fetch(g.feed)).text();
+    const doc = new DOMParser().parseFromString(txt, 'text/xml');
+    const nodes = Array.from(doc.querySelectorAll('item, entry')).slice(0, 30);
+    const pick = (n, sel) => { const x = n.querySelector(sel); return x ? x.textContent.trim() : ''; };
+    const items = nodes.map((n) => {
+      const ln = n.querySelector('link');
+      return { t: pick(n, 'title'), u: (ln && (ln.getAttribute('href') || ln.textContent.trim())) || '', d: Date.parse(pick(n, 'pubDate') || pick(n, 'updated') || pick(n, 'published') || pick(n, 'date')) || 0 };
+    }).filter((x) => x.t && x.u);
+    rec = { t: Date.now(), items, title: pick(doc, 'channel > title') || pick(doc, 'feed > title') };
+    (cache.c.rss = cache.c.rss || {})[g.feed] = rec; cache.save();
+  }
+  const list = rec.items.slice(0, clamp(+g.count || 6, 1, 20));
+  if (!list.length) { el.replaceChildren(h('div', { class: 'w-msg', text: '—' })); return; }
+  el.replaceChildren(...list.map((x) => {
+    const a = h('a', { class: 'feed', href: x.u, title: x.t }, h('span', { class: 'feed-t', text: x.t }), x.d ? h('small', { text: relTime(x.d) }) : null);
+    if (state.settings.newTab) { a.target = '_blank'; a.rel = 'noopener'; }
+    return a;
+  }));
+}
+async function wIframe(g, el) {
+  if (!g.url) { el.replaceChildren(h('button', { class: 'w-msg link', text: t('pageUrl'), onclick: () => openGroupDialog({ group: g }) })); return; }
+  const fr = h('iframe', { class: 'frame', src: g.url, loading: 'lazy', referrerPolicy: 'no-referrer', style: { height: clamp(+g.height || 320, 120, 1200) + 'px' } });
+  el.replaceChildren(fr, h('a', { class: 'frame-open', href: g.url, target: '_blank', rel: 'noopener', html: svg('ext') }));
+}
+async function wGithub(g, el) {
+  const repos = (g.repos || []).map((r) => r.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\/+$/, '')).filter((r) => /^[\w.-]+\/[\w.-]+$/.test(r));
+  if (!repos.length) { el.replaceChildren(h('button', { class: 'w-msg link', text: t('repos'), onclick: () => openGroupDialog({ group: g }) })); return; }
+  cache.c.gh = cache.c.gh || {};
+  // лимит GitHub без токена — 60 запросов в час, поэтому кэш на 6 часов
+  const rows = await Promise.all(repos.map(async (r) => {
+    let rec = cache.c.gh[r];
+    if (!fresh(rec, 360)) {
+      try {
+        let res = await fetch(`https://api.github.com/repos/${r}/releases/latest`);
+        if (res.ok) { const j = await res.json(); rec = { t: Date.now(), tag: j.tag_name, at: Date.parse(j.published_at), url: j.html_url }; }
+        else if (res.status === 404) {
+          res = await fetch(`https://api.github.com/repos/${r}/tags?per_page=1`);
+          const j = res.ok ? await res.json() : [];
+          rec = { t: Date.now(), tag: j[0] ? j[0].name : '—', at: 0, url: `https://github.com/${r}/tags` };
+        } else rec = rec || null;
+        if (rec) cache.c.gh[r] = rec;
+      } catch {}
+    }
+    const [owner, repo] = r.split('/');
+    const name = /^(core|app|server|web|frontend|backend|docs|main|api|ui|desktop|android|ios)$/i.test(repo) ? owner : repo;
+    const a = h('a', { class: 'rel', href: (rec && rec.url) || `https://github.com/${r}`, title: r },
+      iconBox({ title: name, url: `https://${name}.local` }, 'ic sm'),
+      h('span', { class: 'rel-n', text: name }),
+      h('span', { class: 'rel-v' + (rec && rec.at && Date.now() - rec.at < 3 * 864e5 ? ' new' : ''), text: rec ? rec.tag : '…' }),
+      h('small', { text: rec && rec.at ? relTime(rec.at) : '' }));
+    if (state.settings.newTab) { a.target = '_blank'; a.rel = 'noopener'; }
+    return a;
+  }));
+  cache.save();
+  el.replaceChildren(...rows);
+}
+async function wTopsites(g, el) {
+  let ok = false;
+  try { ok = !!(ext && ext.permissions && await ext.permissions.contains({ permissions: ['topSites'] })); } catch {}
+  if (!ok || !ext.topSites) {
+    el.replaceChildren(h('div', { class: 'grant' }, h('span', { class: 'w-msg', text: t('noAccess') }),
+      h('button', { class: 'btn ghost sm', text: t('grant'), onclick: async () => { if (await ext.permissions.request({ permissions: ['topSites'] }).catch(() => false)) render(); } })));
+    return;
+  }
+  const mine = new Set(linkGroups().flatMap((x) => x.items.map((l) => l.url.replace(/\/+$/, ''))));
+  const sites = (await ext.topSites.get()).filter((s) => /^https?:/.test(s.url) && !mine.has(s.url.replace(/\/+$/, ''))).slice(0, clamp(+g.count || 8, 1, 24));
+  const box = h('div', { class: 'links v-tiles' });
+  sites.forEach((s) => {
+    const l = { id: 'ts' + s.url, url: s.url, title: R.cleanTitle(s.title, s.url) || R.titleFromUrl(s.url) };
+    const a = h('a', { class: 'lnk', href: s.url, title: s.url }, iconBox(l), h('span', { class: 'lnk-txt' }, h('span', { class: 'lnk-title', text: l.title })));
+    a.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); openMenuAt(e.clientX, e.clientY, [
+      { icon: 'plus', label: t('addLink'), sub: (linkGroups().length ? linkGroups() : [{ id: null, title: t('inbox') }]).map((x) => ({ label: x.title || t('untitled'), run: () => { quickAdd(s.url, x.id, { title: l.title }); } })) },
+      { icon: 'ext', label: t('openNew'), run: () => window.open(s.url, '_blank', 'noopener') }]); });
+    box.append(a);
+  });
+  el.replaceChildren(box);
+}
+
+// ---------- перетаскивание ----------
+let drag = null;
+let dropMark = null;
+function clearDrop() {
+  document.querySelectorAll('.drop-before,.drop-after,.drop-into,.drop-left,.drop-right').forEach((x) => x.classList.remove('drop-before', 'drop-after', 'drop-into', 'drop-left', 'drop-right'));
+  dropMark = null;
+}
+function externalUrl(dt) {
+  const u = dt.getData('text/uri-list') || dt.getData('text/plain') || '';
+  const line = u.split(/\r?\n/).find((x) => x && !x.startsWith('#')) || '';
+  return /^(https?:\/\/|www\.)\S+$/i.test(line.trim()) || /^[\w-]+(\.[\w-]+)+(:\d+)?(\/\S*)?$/.test(line.trim()) ? line.trim() : '';
+}
+function onDragOver(e, g, card) {
+  const types = Array.from(e.dataTransfer.types || []);
+  if (!drag && !types.includes('text/uri-list') && !types.includes('text/plain')) return;
+  if (drag && drag.type === 'group') {
+    if (drag.id === g.id) return;
+    e.preventDefault();
+    const r = card.getBoundingClientRect();
+    const before = cols > 1 ? e.clientX < r.left + r.width / 2 : e.clientY < r.top + r.height / 2;
+    clearDrop();
+    card.classList.add(before ? 'drop-left' : 'drop-right');
+    dropMark = { type: 'group', before };
+    return;
+  }
+  if (g.kind !== 'links' || state.settings.lock) return;
   e.preventDefault();
-  openCtx(e.clientX, e.clientY, [
-    { label: t('mAddLink'), fn: () => openWModal('create', null, 'link') },
-    { label: t('mAddFolder'), fn: () => openWModal('create', null, 'folder') },
-    { label: t('mAddWidget'), fn: () => openWModal('create') },
-  ]);
-});
-$('#folderGrid').addEventListener('contextmenu', (e) => {
+  e.dataTransfer.dropEffect = drag ? 'move' : 'copy';
+  const over = e.target.closest('.lnk');
+  clearDrop();
+  if (over && (!drag || over.dataset.lid !== drag.id)) {
+    const r = over.getBoundingClientRect();
+    const horiz = g.view !== 'list';
+    const after = horiz ? e.clientX > r.left + r.width / 2 : e.clientY > r.top + r.height / 2;
+    over.classList.add(after ? 'drop-after' : 'drop-before');
+    dropMark = { type: 'link', target: over.dataset.lid, after };
+  } else {
+    card.classList.add('drop-into');
+    dropMark = { type: 'link', target: null };
+  }
+}
+function onDrop(e, g, card) {
+  if (!dropMark) return;
   e.preventDefault();
-  openCtx(e.clientX, e.clientY, [
-    { label: t('mAddLink'), fn: () => openWModal('create', null, 'link') },
-    { label: t('mAddFolder'), fn: () => openWModal('create', null, 'folder') },
-    { label: t('mAddWidget'), fn: () => openWModal('create', null, null, true) },
-  ]);
+  const mark = dropMark;
+  clearDrop();
+  if (mark.type === 'group' && drag) {
+    const from = state.groups.findIndex((x) => x.id === drag.id);
+    const moving = state.groups.splice(from, 1)[0];
+    let to = state.groups.indexOf(g);
+    if (!mark.before) to++;
+    state.groups.splice(to, 0, moving);
+    save();
+    return;
+  }
+  let before = null;
+  if (mark.target) {
+    const idx = g.items.findIndex((x) => x.id === mark.target);
+    before = mark.after ? (g.items[idx + 1] || {}).id || null : mark.target;
+  }
+  if (drag && drag.type === 'link') {
+    if (before === drag.id) return;
+    moveLink(drag.id, g.id, before);
+  } else {
+    const url = externalUrl(e.dataTransfer);
+    if (!url) return;
+    const res = quickAdd(url, g.id);
+    if (res && before) moveLink(res.l.id, g.id, before);
+    if (res) toast(t('added', g.title || t('kLinks')), t('edit'), () => openLinkDialog({ link: res.l }));
+  }
+}
+// бросили ссылку мимо групп — в первую группу закладок
+document.addEventListener('dragover', (e) => { if (!drag && !e.defaultPrevented && Array.from(e.dataTransfer.types).includes('text/uri-list')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
+document.addEventListener('drop', (e) => {
+  if (e.defaultPrevented || drag) return;
+  e.preventDefault();
+  const url = externalUrl(e.dataTransfer);
+  if (!url) return;
+  const res = quickAdd(url);
+  if (res) toast(t('added', res.g.title), t('edit'), () => openLinkDialog({ link: res.l }));
 });
-enhanceNumbers();
-store.load().then((s) => { state = s; scheduleBg(); showBg(); render(); setTimeout(() => document.body.classList.remove('boot'), 1000); });
+
+// ---------- меню ----------
+function openMenu(anchor, items) { const r = anchor.getBoundingClientRect(); openMenuAt(r.right, r.bottom + 4, items, true); }
+function openMenuAt(x, y, items, alignRight) {
+  document.querySelectorAll('.menu.sub').forEach((x) => x.remove());
+  const m = $('#menu');
+  m.replaceChildren(...buildMenu(items));
+  m.hidden = false;
+  const mw = m.offsetWidth, mh = m.offsetHeight;
+  let left = alignRight ? x - mw : x, top = y;
+  left = clamp(left, 8, window.innerWidth - mw - 8);
+  if (top + mh > window.innerHeight - 8) top = Math.max(8, y - mh);
+  m.style.left = left + 'px'; m.style.top = top + 'px';
+}
+function buildMenu(items) {
+  return items.map((it) => {
+    if (it.sep) return h('div', { class: 'menu-sep' });
+    // пункт с подменю — не кнопка: вложенные кнопки ломают клики
+    const b = h(it.sub ? 'div' : 'button', { class: 'menu-item' + (it.danger ? ' danger' : '') + (it.checked ? ' checked' : '') + (it.sub ? ' has-sub' : ''), tabIndex: 0 },
+      h('span', { class: 'mi-ic', html: it.icon ? svg(it.icon) : '' }), h('span', { text: it.label }),
+      it.sub ? h('span', { class: 'mi-arrow', html: svg('move') }) : it.checked ? h('span', { class: 'mi-arrow', html: svg('check') }) : null);
+    b.addEventListener('mouseenter', () => {
+      if (b.closest('.menu.sub') || it.sub) return;
+      document.querySelectorAll('.has-sub.open').forEach((x) => x.classList.remove('open'));
+      document.querySelectorAll('.menu.sub').forEach((x) => x.remove());
+    });
+    if (it.sub) {
+      // подменю живёт в body: у меню есть backdrop-filter, внутри него position: fixed считается от меню
+      const sub = h('div', { class: 'menu sub' }, ...buildMenu(it.sub));
+      const open = () => {
+        document.querySelectorAll('.menu.sub').forEach((x) => { if (x !== sub) x.remove(); });
+        document.querySelectorAll('.has-sub.open').forEach((x) => { if (x !== b) x.classList.remove('open'); });
+        b.classList.add('open');
+        if (!sub.isConnected) document.body.append(sub);
+        placeSub(b, sub);
+      };
+      b.addEventListener('mouseenter', open);
+      b.addEventListener('click', (e) => { e.stopPropagation(); open(); });
+      b.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === 'ArrowRight') { open(); sub.querySelector('.menu-item')?.focus(); } });
+    } else b.addEventListener('click', (e) => { e.stopPropagation(); closeMenu(); it.run && it.run(); });
+    return b;
+  });
+}
+// подменю на position: fixed — всегда целиком в окне, с какой стороны бы ни открылось
+function placeSub(item, sub) {
+  const r = item.getBoundingClientRect();
+  sub.style.maxHeight = (window.innerHeight - 16) + 'px';
+  const w = sub.offsetWidth, hh = sub.offsetHeight;
+  let left = r.right + 4;
+  if (left + w > window.innerWidth - 8) left = r.left - w - 4;
+  let top = r.top - 6;
+  if (top + hh > window.innerHeight - 8) top = window.innerHeight - 8 - hh;
+  sub.style.left = Math.max(8, left) + 'px';
+  sub.style.top = Math.max(8, top) + 'px';
+}
+function closeMenu() { $('#menu').hidden = true; document.querySelectorAll('.menu.sub').forEach((x) => x.remove()); }
+document.addEventListener('mousedown', (e) => { if (!e.target.closest('#menu, .menu.sub')) closeMenu(); });
+window.addEventListener('blur', closeMenu);
+document.addEventListener('contextmenu', (e) => {
+  if (e.target.closest('input,textarea,.todo-txt,dialog,.results')) return;
+  e.preventDefault();
+  openMenuAt(e.clientX, e.clientY, addItems());
+});
+function addItems() {
+  return [
+    { icon: 'link', label: t('addLink'), run: () => openLinkDialog({}) },
+    { icon: 'group', label: t('addGroup'), run: () => openGroupDialog({ kind: 'links' }) },
+    { icon: 'widget', label: t('addWidget'), sub: R.WIDGETS.map((k) => ({ icon: kindIcon(k), label: kName(k), run: () => openGroupDialog({ kind: k }) })) },
+    { sep: true },
+    { icon: 'gear', label: t('settings'), run: openSettings },
+  ];
+}
+
+// ---------- тосты ----------
+function toast(msg, actLabel, act) {
+  const el = h('div', { class: 'toast' }, h('span', { text: msg }));
+  if (actLabel) el.append(h('button', { text: actLabel, onclick: () => { el.remove(); act(); } }));
+  $('#toasts').append(el);
+  setTimeout(() => el.classList.add('out'), 4500);
+  setTimeout(() => el.remove(), 5000);
+}
+
+// ---------- диалоги ----------
+const dlg = $('#dlg');
+function openDialog(title, body, { onSave, saveLabel, wide, extraBtn, noFocus } = {}) {
+  const form = h('form', { class: 'dlg-form' + (wide ? ' wide' : ''), method: 'dialog' });
+  form.append(h('div', { class: 'dlg-head' }, h('h2', { text: title }), h('button', { type: 'button', class: 'tool', html: svg('x'), onclick: () => dlg.close() })));
+  form.append(h('div', { class: 'dlg-body' }, body));
+  const foot = h('div', { class: 'dlg-foot' });
+  if (extraBtn) foot.append(extraBtn, h('span', { class: 'grow' }));
+  else foot.append(h('span', { class: 'grow' }));
+  foot.append(h('button', { type: 'button', class: 'btn ' + (onSave ? 'ghost' : 'primary'), text: onSave ? t('cancel') : t('done'), onclick: () => dlg.close() }));
+  if (onSave) foot.append(h('button', { type: 'submit', class: 'btn primary', text: saveLabel || t('save') }));
+  form.append(foot);
+  form.addEventListener('submit', (e) => { e.preventDefault(); if (onSave && onSave() !== false) dlg.close(); });
+  dlg.replaceChildren(form);
+  dlg.className = wide ? 'wide' : '';
+  if (!dlg.open) dlg.showModal();
+  const first = form.querySelector('input:not([type=checkbox]):not([type=file]),select,textarea');
+  if (first && !noFocus) setTimeout(() => first.focus(), 30);
+  return form;
+}
+dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
+const field = (label, input, cls) => h('label', { class: 'field ' + (cls || '') }, h('span', { class: 'field-l', text: label }), input);
+function select(opts, value) {
+  const s = h('select');
+  opts.forEach(([v, l]) => s.append(h('option', { value: v, text: l, selected: String(v) === String(value) })));
+  return s;
+}
+function seg(opts, value, onChange) {
+  const box = h('div', { class: 'seg' });
+  box.value = value;
+  opts.forEach(([v, l, icn]) => {
+    const b = h('button', { type: 'button', class: String(v) === String(value) ? 'on' : '', html: (icn ? svg(icn) : '') + `<span>${l}</span>` });
+    b.addEventListener('click', () => { box.value = v; box.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); onChange && onChange(v); });
+    box.append(b);
+  });
+  return box;
+}
+
+function openLinkDialog({ link, groupId, url: preUrl }) {
+  const editing = !!link;
+  const cur = link ? findLink(link.id) : null;
+  const data = { url: link?.url || preUrl || '', title: link?.title || '', desc: link?.desc || '', icon: link?.icon || '' };
+  let titleTouched = editing, descTouched = editing && !!link.desc;
+  const url = h('input', { type: 'text', inputMode: 'url', placeholder: 'https://… / 192.168.1.10:8006', value: data.url, required: true });
+  const title = h('input', { type: 'text', maxLength: 60, value: data.title, placeholder: t('title') });
+  const desc = h('input', { type: 'text', maxLength: 90, value: data.desc, placeholder: t('descPh') });
+  const groups = linkGroups();
+  const gsel = select(groups.length ? groups.map((g) => [g.id, g.title || t('untitled')]) : [['__new', t('inbox')]], cur ? cur.g.id : (groupId || groups[0]?.id));
+  const status = h('span', { class: 'fetching', hidden: true, text: t('fetching') });
+  const preview = h('div', { class: 'prev' });
+  const paintPreview = () => {
+    const l = { url: R.normalizeUrl(url.value), title: title.value || R.titleFromUrl(R.normalizeUrl(url.value)), icon: data.icon };
+    preview.replaceChildren(iconBox(l, 'ic big'), h('div', { class: 'prev-t' }, h('b', { text: l.title || '…' }), h('span', { text: desc.value || l.url || '' })));
+  };
+  // --- выбор иконки ---
+  const iconTabs = h('div', { class: 'icon-pick' });
+  const q = h('input', { type: 'text', placeholder: t('iconSearch') });
+  const res = h('div', { class: 'icon-res' });
+  const fillRes = () => {
+    const app = R.guessApp(R.normalizeUrl(url.value), title.value);
+    const found = q.value.trim() ? R.searchIcons(q.value, 36) : (app ? [app, ...R.searchIcons(app.name.split('-')[0], 12).filter((r) => r.name !== app.name)] : []);
+    const autoBtn = h('button', { type: 'button', class: 'ipick auto' + (!data.icon ? ' on' : ''), title: t('iconAuto'), text: t('iconAuto'), onclick: () => { data.icon = ''; fillRes(); paintPreview(); } });
+    res.replaceChildren(autoBtn, ...found.map((r) => {
+      const ref = R.iconRef(r);
+      const b = h('button', { type: 'button', class: 'ipick' + (data.icon === ref ? ' on' : ''), title: r.name, onclick: () => { data.icon = ref; fillRes(); paintPreview(); } },
+        h('img', { src: R.iconRecUrl(r), alt: r.name, loading: 'lazy', onerror: (e) => e.target.parentElement.remove() }));
+      return b;
+    }));
+  };
+  q.addEventListener('input', fillRes);
+  const iconUrl = h('input', { type: 'text', placeholder: 'https://…/icon.svg', value: /^https?:/.test(data.icon) ? data.icon : '' });
+  iconUrl.addEventListener('input', () => { data.icon = iconUrl.value.trim(); paintPreview(); });
+  const iconFile = h('input', { type: 'file', accept: 'image/*', hidden: true });
+  iconFile.addEventListener('change', async () => { const f = iconFile.files[0]; if (!f) return; data.icon = await fileToDataUrl(f, 128); paintPreview(); });
+  const emoji = h('input', { type: 'text', maxLength: 4, placeholder: '🚀', value: data.icon.startsWith('txt:') ? data.icon.slice(4) : '', class: 'emoji-in' });
+  emoji.addEventListener('input', () => { data.icon = emoji.value.trim() ? 'txt:' + emoji.value.trim() : ''; paintPreview(); });
+  iconTabs.append(q, res, h('div', { class: 'icon-row' }, iconUrl, h('button', { type: 'button', class: 'btn ghost sm', text: t('upload'), onclick: () => iconFile.click() }), emoji, iconFile));
+
+  let ctl = null, tmr = 0;
+  const autofill = () => {
+    clearTimeout(tmr);
+    paintPreview(); fillRes();
+    const u = R.normalizeUrl(url.value);
+    if (!u || !R.parseUrl(u)) return;
+    if (!titleTouched) { title.value = R.titleFromUrl(u); paintPreview(); }
+    if (titleTouched && descTouched) return;
+    tmr = setTimeout(async () => {
+      if (ctl) ctl.abort();
+      ctl = new AbortController();
+      status.hidden = false;
+      const m = await R.fetchMeta(u, ctl.signal);
+      status.hidden = true;
+      if (!m || R.normalizeUrl(url.value) !== u) return;
+      if (!titleTouched && m.title && !R.guessApp(u, '')) title.value = m.title;
+      if (!descTouched && m.desc) desc.value = m.desc;
+      paintPreview(); fillRes();
+    }, 450);
+  };
+  url.addEventListener('input', autofill);
+  title.addEventListener('input', () => { titleTouched = true; paintPreview(); });
+  desc.addEventListener('input', () => { descTouched = true; paintPreview(); });
+
+  const body = h('div', { class: 'stack' }, preview, field(t('url'), url), h('div', { class: 'row2' }, field(t('title'), title), field(t('group'), gsel)),
+    field(t('desc'), desc), status, h('div', { class: 'field' }, h('span', { class: 'field-l', text: t('icon') }), iconTabs));
+  openDialog(editing ? t('editLink') : t('newLink'), body, {
+    extraBtn: editing ? h('button', { type: 'button', class: 'btn ghost danger', html: svg('trash'), title: t('del'), onclick: () => { dlg.close(); removeLink(link.id); } }) : null,
+    onSave: () => {
+      const u = R.normalizeUrl(url.value);
+      if (!u) { url.focus(); return false; }
+      const vals = { url: u, title: title.value.trim() || R.titleFromUrl(u), desc: desc.value.trim(), icon: data.icon };
+      let target = gsel.value === '__new' ? ensureLinkGroup() : findGroup(gsel.value);
+      if (editing) {
+        const f = findLink(link.id);
+        if (!f) return;
+        if (vals.url !== f.l.url || vals.title !== f.l.title || vals.icon !== f.l.icon) delete cache.c.icon[iconKey(f.l)];
+        Object.assign(f.l, vals);
+        if (!vals.desc) delete f.l.desc;
+        if (!vals.icon) delete f.l.icon;
+        if (target && target !== f.g) { f.g.items.splice(f.i, 1); target.items.push(f.l); }
+      } else {
+        const l = { id: uid(), ...vals };
+        if (!l.desc) delete l.desc;
+        if (!l.icon) delete l.icon;
+        (target || ensureLinkGroup()).items.push(l);
+      }
+      save();
+    },
+  });
+  paintPreview(); fillRes();
+  if (preUrl && !editing) autofill();
+}
+
+function openGroupDialog({ group, kind }) {
+  const editing = !!group;
+  const g = group ? JSON.parse(JSON.stringify(group)) : R.newGroup(kind || 'links');
+  const title = h('input', { type: 'text', maxLength: 40, value: g.title || '', placeholder: kName(g.kind) });
+  const span = seg([[1, '1'], [2, '2'], [3, '3'], [4, t('wFull')]], g.span || 1);
+  const parts = [field(t('title'), title), field(t('width'), span)];
+  let view = null, city, days, hours, base, syms, coins, zones, events, feed, count, purl, height, repos;
+  const rangeField = (label, min, max, step, val) => {
+    const r = h('input', { type: 'range', min, max, step, value: val });
+    const v = h('b', { text: r.value });
+    r.oninput = () => { v.textContent = r.value; };
+    return [r, field(label, h('div', { class: 'range' }, r, v))];
+  };
+  if (g.kind === 'links') { view = seg([['tiles', t('vTiles'), 'tiles'], ['list', t('vList'), 'list'], ['compact', t('vCompact'), 'compact']], g.view); parts.push(field(t('view'), view)); }
+  if (g.kind === 'weather') {
+    city = h('input', { type: 'text', value: g.city || '', placeholder: R.lang() === 'ru' ? 'Одесса' : 'London', required: true });
+    days = h('input', { type: 'range', min: 0, max: 7, step: 1, value: g.days || 0 });
+    hours = h('input', { type: 'range', min: 0, max: 24, step: 3, value: g.hours || 0 });
+    const dv = h('b', { text: days.value }), hv = h('b', { text: hours.value });
+    days.oninput = () => { dv.textContent = days.value; }; hours.oninput = () => { hv.textContent = hours.value; };
+    parts.push(field(t('city'), city), h('div', { class: 'row2' }, field(t('days'), h('div', { class: 'range' }, days, dv)), field(t('hours'), h('div', { class: 'range' }, hours, hv))));
+  }
+  if (g.kind === 'currency') {
+    base = select(CURRENCIES.map((c) => [c, c]), g.base);
+    syms = h('div', { class: 'chips' });
+    CURRENCIES.forEach((c) => {
+      const b = h('button', { type: 'button', class: 'chip' + ((g.symbols || []).includes(c) ? ' on' : ''), text: c, onclick: () => b.classList.toggle('on') });
+      syms.append(b);
+    });
+    parts.push(field(t('base'), base), field(t('symbols'), syms));
+  }
+  if (g.kind === 'crypto') { coins = h('input', { type: 'text', value: (g.coins || []).join(', '), placeholder: 'BTC, ETH, SOL' }); parts.push(field(t('coins'), coins)); }
+  if (g.kind === 'clock') {
+    zones = h('input', { type: 'text', value: (g.zones || []).join(', '), placeholder: t('zonesHint') });
+    parts.push(field(t('zones'), zones), h('p', { class: 'muted', text: (R.lang() === 'ru' ? 'Своё имя: Дом=Europe/Kyiv. Твой пояс: ' : 'Custom label: Home=Europe/Berlin. Yours: ') + Intl.DateTimeFormat().resolvedOptions().timeZone }));
+  }
+  if (g.kind === 'countdown') {
+    events = h('textarea', { rows: 4, value: (g.events || []).map((e) => e.date + ' ' + e.title).join('\n'), placeholder: new Date().getFullYear() + '-12-31 ' + (R.lang() === 'ru' ? 'Новый год' : 'New Year') });
+    parts.push(field(t('events'), events));
+  }
+  if (g.kind === 'rss') {
+    feed = h('input', { type: 'text', inputMode: 'url', value: g.feed || '', placeholder: 'https://example.com/feed.xml', required: true });
+    let cr; [count, cr] = rangeField(t('count'), 1, 20, 1, g.count || 6);
+    parts.push(field(t('feed'), feed), cr);
+  }
+  if (g.kind === 'iframe') {
+    purl = h('input', { type: 'text', inputMode: 'url', value: g.url || '', placeholder: 'https://status.example.com', required: true });
+    let hr; [height, hr] = rangeField(t('height'), 150, 900, 10, g.height || 320);
+    parts.push(field(t('pageUrl'), purl), hr, h('p', { class: 'muted', text: t('noFrame') }));
+  }
+  if (g.kind === 'github') { repos = h('input', { type: 'text', value: (g.repos || []).join(', '), placeholder: 'immich-app/immich, jellyfin/jellyfin' }); parts.push(field(t('repos'), repos)); }
+  if (g.kind === 'topsites') { let cr; [count, cr] = rangeField(t('count'), 4, 24, 1, g.count || 8); parts.push(cr); }
+  openDialog(editing ? (g.title || kName(g.kind)) : kName(g.kind), h('div', { class: 'stack' }, ...parts), {
+    extraBtn: editing ? h('button', { type: 'button', class: 'btn ghost danger', html: svg('trash'), title: t('del'), onclick: () => { dlg.close(); removeGroup(group); } }) : null,
+    onSave: () => {
+      const tgt = group || g;
+      tgt.title = title.value.trim() || (editing ? '' : kName(g.kind));
+      tgt.span = +span.value || 1;
+      if (view) tgt.view = view.value;
+      if (city) { if (!city.value.trim()) { city.focus(); return false; } tgt.city = city.value.trim(); tgt.days = +days.value; tgt.hours = +hours.value; }
+      if (base) { tgt.base = base.value; tgt.symbols = Array.from(syms.querySelectorAll('.chip.on')).map((x) => x.textContent); }
+      if (coins) tgt.coins = coins.value.split(/[\s,;]+/).map((s) => s.trim().toUpperCase()).filter(Boolean);
+      if (feed) {
+        const u = R.normalizeUrl(feed.value);
+        if (!u) { feed.focus(); return false; }
+        askOrigin(u).then(() => render()); // спрашиваем доступ, пока есть жест пользователя
+        if (u !== tgt.feed && cache.c.rss) delete cache.c.rss[u];
+        tgt.feed = u;
+      }
+      if (purl) { const u = R.normalizeUrl(purl.value); if (!u) { purl.focus(); return false; } tgt.url = u; tgt.height = +height.value; }
+      if (count) tgt.count = +count.value;
+      if (zones) tgt.zones = zones.value.split(',').map((z) => z.trim()).filter((z) => parseZone(z));
+      if (events) tgt.events = events.value.split('\n').map((l) => /^\s*(\d{4}-\d{2}-\d{2})\s+(.+)$/.exec(l)).filter(Boolean).map((m) => ({ date: m[1], title: m[2].trim() }));
+      if (repos) tgt.repos = repos.value.split(/[\s,;]+/).map((r) => r.trim()).filter(Boolean);
+      if (g.kind === 'topsites' && ext && ext.permissions) ext.permissions.request({ permissions: ['topSites'] }).then((ok) => ok && render()).catch(() => {});
+      if (!editing) state.groups.push(tgt);
+      save();
+      if (!editing) requestAnimationFrame(() => $(`[data-gid="${tgt.id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
+    },
+  });
+}
+
+// ---------- настройки ----------
+const ENGINES = {
+  google: ['Google', 'https://www.google.com/search?q=%s'], duck: ['DuckDuckGo', 'https://duckduckgo.com/?q=%s'],
+  bing: ['Bing', 'https://www.bing.com/search?q=%s'], yandex: ['Яндекс', 'https://yandex.ru/search/?text=%s'],
+  brave: ['Brave', 'https://search.brave.com/search?q=%s'], startpage: ['Startpage', 'https://www.startpage.com/do/search?q=%s'],
+  perplexity: ['Perplexity', 'https://www.perplexity.ai/search?q=%s'], custom: [t('sEngineCustom'), ''],
+};
+function openSettings() {
+  const s = state.settings;
+  const live = () => { save(); applySettings(); };
+  const chk = (key, label, after) => {
+    const c = h('input', { type: 'checkbox', checked: !!s[key] });
+    c.addEventListener('change', () => { s[key] = c.checked; live(); after && after(); });
+    return h('label', { class: 'switch' }, c, h('i'), h('span', { text: label }));
+  };
+  // вид
+  const name = h('input', { type: 'text', value: s.name, placeholder: t('sNamePh'), maxLength: 30 });
+  name.addEventListener('input', () => { s.name = name.value; save(false); tick(); });
+  const accents = h('div', { class: 'swatches' }, ...R.ACCENTS.map((c) => {
+    const b = h('button', { type: 'button', class: 'sw' + (s.accent === c ? ' on' : ''), style: { background: c } });
+    b.addEventListener('click', () => { s.accent = c; accents.querySelectorAll('.sw').forEach((x) => x.classList.toggle('on', x === b)); live(); });
+    return b;
+  }));
+  const look = h('section', { class: 'set' }, h('h3', { text: t('sLook') }),
+    chk('showClock', t('sClock')), field(t('sName'), name), chk('showSearch', t('sSearch')), chk('showDesc', t('sDesc')),
+    field(t('sAccent'), accents),
+    field(t('sDensity'), seg([['comfortable', t('dComfort')], ['compact', t('dCompact')]], s.density, (v) => { s.density = v; live(); })),
+    field(t('sMaxw'), seg([['normal', t('mwNormal')], ['wide', t('mwWide')], ['full', t('mwFull')]], s.maxw, (v) => { s.maxw = v; live(); })),
+    field(t('sCols'), seg([[0, t('colsAuto')], [2, '2'], [3, '3'], [4, '4'], [5, '5'], [6, '6']], s.cols, (v) => { s.cols = +v; live(); })));
+  // фон
+  const b = s.bg;
+  const bgBox = h('div', { class: 'stack' });
+  const paintBgBox = () => {
+    const kids = [];
+    if (b.mode === 'curated' || b.mode === 'custom') {
+      kids.push(h('div', { class: 'row2' },
+        field(t('bgChange'), (() => { const x = select([[0, t('int0')], [15, t('int15')], [60, t('int60')], [1440, t('int1440')], [-1, t('intNever')]], b.interval); x.onchange = () => { b.interval = +x.value; save(false); showBg(); }; return x; })()),
+        h('button', { type: 'button', class: 'btn ghost', html: svg('refresh') + `<span>${t('bgNext')}</span>`, onclick: () => showBg(true) })));
+    }
+    if (b.mode === 'custom') {
+      const ta = h('textarea', { rows: 3, value: (b.urls || []).join('\n'), placeholder: 'https://…' });
+      ta.addEventListener('change', () => { b.urls = ta.value.split('\n').map((x) => x.trim()).filter(Boolean); bgLocal.index = 0; save(false); showBg(); });
+      kids.push(field(t('bgUrls'), ta));
+    }
+    if (b.mode === 'upload') {
+      const f = h('input', { type: 'file', accept: 'image/*', hidden: true });
+      f.addEventListener('change', async () => { if (!f.files[0]) return; await store.setBgFile(await fileToDataUrl(f.files[0])); showBg(); });
+      kids.push(h('button', { type: 'button', class: 'btn ghost', text: t('pickFile'), onclick: () => f.click() }), f);
+    }
+    if (b.mode === 'color') {
+      const inp = h('input', { type: 'text', value: b.color });
+      inp.addEventListener('change', () => { b.color = inp.value; save(false); showBg(); });
+      kids.push(h('div', { class: 'swatches' }, ...R.BG_PRESETS.map((c) => h('button', { type: 'button', class: 'sw wide', style: { background: c }, onclick: () => { b.color = c; inp.value = c; save(false); showBg(); } }))), inp);
+    }
+    const rng = (key, max, label) => {
+      const r = h('input', { type: 'range', min: 0, max, step: 1, value: b[key] });
+      const v = h('b', { text: b[key] });
+      r.addEventListener('input', () => { b[key] = +r.value; v.textContent = r.value; showBgFilters(); save(false); });
+      return field(label, h('div', { class: 'range' }, r, v));
+    };
+    kids.push(h('div', { class: 'row2' }, rng('blur', 20, t('blur')), rng('dim', 80, t('dim'))));
+    bgBox.replaceChildren(...kids);
+  };
+  const bgSec = h('section', { class: 'set' }, h('h3', { text: t('sBg') }),
+    seg([['curated', t('bgCurated')], ['custom', t('bgCustom')], ['upload', t('bgUpload')], ['color', t('bgColor')]], b.mode, (v) => { b.mode = v; save(false); paintBgBox(); showBg(); }),
+    bgBox);
+  paintBgBox();
+  // поведение
+  const eng = select(Object.entries(ENGINES).map(([k, [l]]) => [k, l]), s.engine);
+  const engC = h('input', { type: 'text', value: s.engineCustom, placeholder: 'https://example.com/search?q=%s', hidden: s.engine !== 'custom' });
+  eng.onchange = () => { s.engine = eng.value; engC.hidden = s.engine !== 'custom'; save(false); };
+  engC.onchange = () => { s.engineCustom = engC.value.trim(); save(false); };
+  const lang = select([['auto', t('langAuto')], ['ru', 'Русский'], ['en', 'English']], s.lang);
+  lang.onchange = () => { s.lang = lang.value; R.setLang(s.lang); save(); applySettings(); tick(); openSettings(); };
+  const beh = h('section', { class: 'set' }, h('h3', { text: t('sBehavior') }),
+    h('div', { class: 'row2' }, field(t('sEngine'), eng), field(t('sLang'), lang)), engC,
+    chk('newTab', t('sNewTab')), chk('lock', t('sLock')), chk('sync', t('sSync')));
+  // данные
+  const file = h('input', { type: 'file', accept: 'application/json,.json', hidden: true });
+  file.addEventListener('change', () => importFile(file.files[0]));
+  const data = h('section', { class: 'set' }, h('h3', { text: t('sData') }),
+    h('div', { class: 'btns' },
+      h('button', { type: 'button', class: 'btn ghost', text: t('exportJson'), onclick: exportJson }),
+      h('button', { type: 'button', class: 'btn ghost', text: t('importJson'), onclick: () => file.click() }),
+      h('button', { type: 'button', class: 'btn ghost', text: t('importBm'), onclick: importBookmarks }),
+      h('button', { type: 'button', class: 'btn ghost danger', text: t('reset'), onclick: () => { if (confirm(t('confirmReset'))) { state = R.defaultState(); save(); applySettings(); showBg(); openSettings(); } } }),
+      file));
+  const ver = (ext && ext.runtime && ext.runtime.getManifest) ? ext.runtime.getManifest().version : '2';
+  const about = h('section', { class: 'set' }, h('h3', { text: t('sAbout') }), h('p', { class: 'muted', text: `R.Db ${ver} — ${t('about')}` }),
+    h('p', { class: 'muted', text: t('keys') }),
+    h('div', { class: 'btns' }, h('a', { class: 'btn ghost', href: 'https://github.com/DezFix/R.Db', target: '_blank', text: 'GitHub' }),
+      h('a', { class: 'btn ghost', href: 'https://ko-fi.com/dezfix', target: '_blank', text: '☕ ' + t('support') })));
+  openDialog(t('settings'), h('div', { class: 'settings' }, look, bgSec, beh, data, about), { wide: true, noFocus: true });
+}
+function showBgFilters() {
+  const b = state.settings.bg;
+  $('#dim').style.background = `rgba(6,8,12,${b.dim / 100})`;
+  document.documentElement.style.setProperty('--bg-blur', b.blur + 'px');
+}
+function exportJson() {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const a = h('a', { href: URL.createObjectURL(blob), download: `rdb-${new Date().toISOString().slice(0, 10)}.json` });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+async function importFile(f) {
+  if (!f) return;
+  try {
+    const j = JSON.parse(await f.text());
+    const s = Array.isArray(j.groups) ? R.sanitize(j) : R.migrateV1(j);
+    if (!s) throw new Error('bad');
+    state = s;
+    save(); applySettings(); showBg();
+    dlg.close();
+    toast(t('imported', state.groups.length));
+  } catch { alert(t('importErr')); }
+}
+async function importBookmarks() {
+  const api = ext && ext.permissions;
+  try {
+    const ok = api ? await api.request({ permissions: ['bookmarks'] }) : false;
+    if (!ok || !ext.bookmarks) throw new Error('denied');
+  } catch { toast(t('bmDenied')); return; }
+  const tree = await ext.bookmarks.getTree();
+  const folders = [];
+  const walk = (n, depth) => {
+    if (n.children) {
+      const links = n.children.filter((c) => c.url && /^https?:/.test(c.url)).length;
+      const deep = (function cnt(x) { return (x.children || []).reduce((a, c) => a + (c.url ? 1 : cnt(c)), 0); })(n);
+      if (n.title && deep) folders.push({ n, depth, links, deep });
+      n.children.forEach((c) => walk(c, depth + (n.title ? 1 : 0)));
+    }
+  };
+  tree.forEach((n) => walk(n, 0));
+  const list = h('div', { class: 'bm-list' });
+  let pick = null;
+  folders.forEach((f) => {
+    const b = h('button', { type: 'button', class: 'bm', style: { paddingLeft: 10 + f.depth * 16 + 'px' } }, h('span', { text: '📁 ' + f.n.title }), h('small', { text: t('bmItems', f.deep) }));
+    b.addEventListener('click', () => { pick = f.n; list.querySelectorAll('.bm').forEach((x) => x.classList.toggle('on', x === b)); });
+    list.append(b);
+  });
+  openDialog(t('importBm'), h('div', { class: 'stack' }, h('p', { class: 'muted', text: t('bmPick') }), list), {
+    saveLabel: t('bmImport'),
+    onSave: () => {
+      if (!pick) return false;
+      const groups = [];
+      const take = (node, prefix) => {
+        const links = (node.children || []).filter((c) => c.url && /^https?:/.test(c.url)).slice(0, 200)
+          .map((c) => ({ id: uid(), title: R.cleanTitle(c.title, c.url) || R.titleFromUrl(c.url), url: c.url }));
+        const title = prefix ? prefix + ' / ' + node.title : node.title;
+        if (links.length) groups.push({ id: uid(), kind: 'links', title, view: links.length > 8 ? 'compact' : 'tiles', span: 1, items: links });
+        (node.children || []).filter((c) => c.children).forEach((c) => take(c, links.length ? title : prefix));
+      };
+      take(pick, '');
+      state.groups.push(...groups.slice(0, 30));
+      save();
+      toast(t('imported', groups.reduce((a, g) => a + g.items.length, 0)));
+    },
+  });
+}
+
+// ---------- поиск ----------
+let sel = 0, hits = [];
+function engineUrl(q) {
+  const s = state.settings;
+  const tpl = s.engine === 'custom' && s.engineCustom.includes('%s') ? s.engineCustom : (ENGINES[s.engine] || ENGINES.google)[1];
+  return tpl.replace('%s', encodeURIComponent(q));
+}
+function doSearch() {
+  const q = $('#search').value.trim();
+  const box = $('#results');
+  if (!q) { box.hidden = true; hits = []; return; }
+  const k = q.toLowerCase();
+  const all = [];
+  linkGroups().forEach((g) => g.items.forEach((l) => {
+    const tt = l.title.toLowerCase(), u = l.url.toLowerCase().replace(/^https?:\/\/(www\.)?/, ''), d = (l.desc || '').toLowerCase();
+    const score = tt.startsWith(k) ? 3 : tt.includes(k) ? 2 : u.includes(k) || d.includes(k) || g.title.toLowerCase().includes(k) ? 1 : 0;
+    if (score) all.push({ l, g, score });
+  }));
+  all.sort((a, b) => b.score - a.score);
+  hits = all.slice(0, 7).map((x) => ({ kind: 'link', ...x }));
+  const looksUrl = /^(https?:\/\/)?[\w-]+(\.[\w-]+)+(:\d+)?(\/\S*)?$/.test(q) || /^(localhost|\d{1,3}(\.\d{1,3}){3})(:\d+)?/.test(q);
+  if (looksUrl) hits.push({ kind: 'url', url: R.normalizeUrl(q) });
+  hits.push({ kind: 'web', q });
+  sel = 0;
+  box.replaceChildren(...hits.map((x, i) => {
+    let row;
+    if (x.kind === 'link') row = h('a', { class: 'res', href: x.l.url }, iconBox(x.l, 'ic sm'), h('span', { class: 'res-t', text: x.l.title }), h('span', { class: 'res-u', text: x.g.title }));
+    else if (x.kind === 'url') row = h('a', { class: 'res', href: x.url }, h('span', { class: 'ic sm plain', html: svg('ext') }), h('span', { class: 'res-t', text: x.url }), h('span', { class: 'res-u', text: t('openLink') }));
+    else row = h('a', { class: 'res', href: engineUrl(x.q) }, h('span', { class: 'ic sm plain', html: svg('search') }), h('span', { class: 'res-t', text: x.q }), h('span', { class: 'res-u', text: t('searchWeb') }));
+    if (state.settings.newTab && x.kind === 'link') { row.target = '_blank'; row.rel = 'noopener'; }
+    row.addEventListener('mousemove', () => { if (sel !== i) { sel = i; paintSel(); } });
+    return row;
+  }));
+  box.hidden = false;
+  paintSel();
+}
+function paintSel() { $('#results').querySelectorAll('.res').forEach((r, i) => r.classList.toggle('sel', i === sel)); }
+function initSearch() {
+  const inp = $('#search');
+  inp.addEventListener('input', doSearch);
+  inp.addEventListener('focus', doSearch);
+  inp.addEventListener('blur', () => setTimeout(() => { $('#results').hidden = true; }, 150));
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(hits.length - 1, sel + 1); paintSel(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(0, sel - 1); paintSel(); }
+    else if (e.key === 'Escape') { inp.value = ''; doSearch(); inp.blur(); }
+    else if (e.key === 'Enter') {
+      const row = $('#results').querySelectorAll('.res')[sel];
+      if (!row) return;
+      e.preventDefault();
+      if (e.ctrlKey || e.metaKey || row.target === '_blank') window.open(row.href, '_blank', 'noopener'); else location.href = row.href;
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (dlg.open || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.target.closest && e.target.closest('input,textarea,select,.todo-txt')) return;
+    if (e.key === 'Escape') closeMenu();
+    if (!state.settings.showSearch) return;
+    if (e.key === '/') { e.preventDefault(); inp.focus(); }
+    else if (e.key.length === 1 && /\S/.test(e.key)) { inp.focus(); } // просто начни печатать
+  });
+}
+
+// ---------- вставка ссылки ----------
+document.addEventListener('paste', (e) => {
+  if (dlg.open || (e.target.closest && e.target.closest('input,textarea,.todo-txt'))) return;
+  const txt = (e.clipboardData.getData('text') || '').trim();
+  if (!/^(https?:\/\/|www\.)\S+$/i.test(txt) && !/^(localhost|\d{1,3}(\.\d{1,3}){3})(:\d+)?(\/\S*)?$/.test(txt)) return;
+  e.preventDefault();
+  const hovered = document.querySelector('.card:hover');
+  const res = quickAdd(txt, hovered && hovered.dataset.gid);
+  if (res) toast(t('added', res.g.title), t('edit'), () => openLinkDialog({ link: res.l }));
+});
+
+// ---------- входящие из попапа и меню ----------
+async function mergeInbox() {
+  const items = await store.takeInbox();
+  if (!items.length) return;
+  let last = null;
+  items.forEach((it) => {
+    if (!it.url) return;
+    const res = quickAdd(it.url, it.groupId, { title: it.title, fav: it.fav });
+    if (res && it.desc) res.l.desc = it.desc;
+    if (res && it.icon) res.l.icon = it.icon;
+    last = res;
+  });
+  if (last) { save(); toast(t('added', last.g.title)); }
+}
+if (ext && ext.storage && ext.storage.onChanged) {
+  ext.storage.onChanged.addListener((ch, areaName) => {
+    if (areaName === 'local' && ch[store.keys.INBOX] && ch[store.keys.INBOX].newValue) mergeInbox();
+    if (areaName === 'local' && ch[store.keys.KEY]) {
+      const nv = ch[store.keys.KEY].newValue;
+      if (nv && (+nv.ts || 0) > (+state.ts || 0) && !document.hasFocus()) { state = R.sanitize(nv); applySettings(); render(); }
+    }
+    if (areaName === 'sync' && ch[store.keys.SYNC_PREFIX + 'meta']) {
+      const m = ch[store.keys.SYNC_PREFIX + 'meta'].newValue;
+      if (m && m.ts > (state.ts || 0) + 1000) store.load().then(({ state: s }) => { if (s.ts > state.ts) { state = s; applySettings(); render(); showBg(); } });
+    }
+  });
+}
+window.addEventListener('focus', () => { if (state) mergeInbox(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) store.flushSync(); });
+window.addEventListener('pagehide', () => store.flushSync());
+
+// ---------- старт ----------
+(async function boot() {
+  const { state: s, migrated } = await store.load();
+  state = s;
+  applySettings();
+  tick();
+  setInterval(tick, 5000);
+  await showBg();
+  render();
+  initSearch();
+  $('#addBtn').addEventListener('click', (e) => openMenu(e.currentTarget, addItems()));
+  $('#settingsBtn').addEventListener('click', openSettings);
+  requestAnimationFrame(() => document.body.classList.remove('booting'));
+  if (migrated) { await store.save(state); await store.flushSync(state); store.cleanupOld(); toast(R.lang() === 'ru' ? 'Данные из прошлой версии перенесены' : 'Data from the previous version was imported'); }
+  mergeInbox();
+})();

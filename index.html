@@ -3,214 +3,50 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Новая вкладка</title>
-<link rel="icon" type="image/png" href="icons/icon128.png">
+<title>R.Db</title>
+<link rel="icon" type="image/png" href="icons/icon48.png">
 <link rel="stylesheet" href="style.css">
 </head>
-<body class="boot">
-<div id="bgA" class="bg"></div>
-<div id="bgB" class="bg" hidden></div>
+<body class="booting">
+<div class="bg" id="bgA"></div>
+<div class="bg" id="bgB"></div>
 <div id="dim"></div>
 
-<main class="center">
-  <div class="clock-block" id="clockBlock">
-    <div id="clock">00:00</div>
-    <div id="date"></div>
-  </div>
-
-  <div id="grid" class="board"></div>
-  <p id="empty" class="empty" hidden data-i18n="emptyBoard">Пусто — включи ✎ и добавь первое</p>
-
-  <div id="editBar" class="editbar" hidden>
-    <button id="addBtn" data-i18n="addBtn">+ Добавить</button>
-  </div>
-</main>
-
-<!-- Папка поверх рабочего стола -->
-<div id="folderView" class="overlay folder-overlay" hidden>
-  <div class="sheet">
-    <div class="sheet-head">
-      <div class="sheet-titles">
-        <h3 id="folderTitle"></h3>
-        <span id="folderCount"></span>
-      </div>
-      <button id="folderAddBtn" data-i18n-title="folderAdd" title="Добавить закладку">+</button>
+<div class="page" id="page">
+  <header class="top" id="top">
+    <div class="clock-wrap" id="clockWrap">
+      <div class="clock" id="clock"></div>
+      <div class="hello" id="hello"></div>
     </div>
-    <nav id="folderCrumbs" class="crumbs"></nav>
-    <div id="folderGrid" class="grid sheet-grid"></div>
-    <p id="folderEmpty" class="empty" hidden data-i18n="folderEmpty">Пусто — нажми + сверху, чтобы добавить</p>
+  </header>
+
+  <div class="search" id="searchWrap">
+    <span class="search-ic" id="searchIc"></span>
+    <input id="search" type="text" autocomplete="off" spellcheck="false">
+    <kbd class="search-kbd">/</kbd>
+    <div class="results" id="results" hidden></div>
+  </div>
+
+  <main class="grid" id="grid"></main>
+
+  <div class="empty-board" id="emptyBoard" hidden>
+    <div class="empty-title" id="emptyTitle"></div>
+    <div class="empty-hint" id="emptyHint"></div>
   </div>
 </div>
 
-<footer class="dock">
-  <span id="credit" class="credit"></span>
-  <div class="spacer"></div>
-  <button id="editToggle" data-i18n-title="editMode" title="Редактировать"><img src="assets/icons/edit.svg" alt=""></button>
-  <button id="settingsBtn" data-i18n-title="settings" title="Настройки"><img src="assets/icons/settings.svg" alt=""></button>
-</footer>
+<a class="credit" id="credit" target="_blank" rel="noopener" hidden></a>
+<nav class="fab" id="fab">
+  <button id="addBtn" class="fab-btn"></button>
+  <button id="settingsBtn" class="fab-btn"></button>
+</nav>
 
-<!-- Единое меню создания/изменения -->
-<div id="wmodal" class="overlay" hidden>
-  <form id="wmodalForm" class="card-modal">
-    <h3 id="wmodalTitle">Новое</h3>
-    <label id="wTypeWrap"><span data-i18n="wType">Тип</span>
-      <select id="wType">
-        <option value="link" data-i18n="tLink">Ссылка</option>
-        <option value="folder" data-i18n="tFolder">Папка</option>
-        <option value="note" data-i18n="tNote">Заметка</option>
-        <option value="checklist" data-i18n="tChecklist">Чек-лист</option>
-        <option value="weather" data-i18n="tWeather">Погода</option>
-        <option value="currency" data-i18n="tCurrency">Курсы валют</option>
-        <option value="crypto" data-i18n="tCrypto">Крипта</option>
-        <option value="quote" data-i18n="tQuote">Цитата дня</option>
-      </select>
-    </label>
-    <label id="wTitleWrap"><span data-i18n="fTitle">Название</span><input id="wTitle" maxlength="60" data-i18n-ph="fTitle" placeholder="Название"></label>
-    <label id="wUrlWrap"><span data-i18n="fUrl">URL</span><input id="wUrl" type="text" inputmode="url" placeholder="https://..."></label>
-    <label id="wIconAutoWrap" class="check"><input type="checkbox" id="wIconAuto" checked><span data-i18n="fIconAuto">Подтягивать иконку автоматически</span></label>
-    <label id="wIconWrap"><span data-i18n="fIcon">Своя иконка (URL)</span><input id="wIcon" type="text" inputmode="url" data-i18n-ph="fIconPh" placeholder="https://… — пусто = авто"><img id="wIconPrev" class="icon-prev" hidden alt=""></label>
-    <label id="wCityWrap"><span data-i18n="fCity">Город</span><input id="wCity" type="text" placeholder="Москва"></label>
-    <label id="wCurWrap" class="check"><input type="checkbox" id="wCur"><span data-i18n="fCur">Текущая погода</span></label>
-    <label id="wDaysWrap"><span data-i18n="fDays">Дней (0–7)</span><input id="wDays" type="number" min="0" max="7" step="1" value="3"></label>
-    <label id="wHoursWrap"><span data-i18n="fHours">Часов (0–24, шаг 3)</span><input id="wHours" type="number" min="0" max="24" step="3" value="0"></label>
-    <label id="wBaseWrap"><span data-i18n="fBase">Базовая валюта</span>
-      <select id="wBase"></select>
-    </label>
-    <label id="wSymsWrap"><span data-i18n="fSyms">Валюты</span>
-      <div id="wSymsBox" class="check-list"></div>
-    </label>
-    <label id="wCoinsWrap"><span data-i18n="fCoins">Монеты через запятую</span><input id="wCoins" type="text" placeholder="BTC, ETH, SOL"></label>
-    <label id="wFontWrap"><span data-i18n="fFont">Размер текста</span>
-      <select id="wFont">
-        <option value="s" data-i18n="fontS">Мелкий</option>
-        <option value="m" data-i18n="fontM" selected>Средний</option>
-        <option value="l" data-i18n="fontL">Крупный</option>
-      </select>
-    </label>
-    <div class="row">
-      <button type="submit" class="btn-primary" data-i18n="save">Сохранить</button>
-      <button type="button" id="wmodalCancel" class="btn-ghost" data-i18n="cancel">Отмена</button>
-    </div>
-  </form>
-</div>
+<div class="menu" id="menu" hidden></div>
+<div class="toasts" id="toasts"></div>
+<dialog id="dlg"></dialog>
 
-<!-- Настройки: боковая панель -->
-<div id="settingsModal" class="drawer-root" hidden>
-  <div class="drawer-bg" id="settingsBg"></div>
-  <aside class="drawer">
-    <div class="drawer-head">
-      <h3 data-i18n="sTitle">Настройки</h3>
-    </div>
-    <div class="drawer-body">
-      <div class="set-box">
-      <h4><img class="h-ic" src="assets/icons/bg.svg" alt=""><span data-i18n="sBg">Фон</span></h4>
-      <label><span data-i18n="sSrc">Источник</span>
-        <select id="sBgMode">
-          <option value="curated" data-i18n="sCurated">Карусель (подборка)</option>
-          <option value="custom" data-i18n="sCustom">Свои картинки (ссылки)</option>
-          <option value="upload" data-i18n="sUpload">Своя картинка (файл)</option>
-          <option value="gradient" data-i18n="sGradient">Градиент</option>
-          <option value="color" data-i18n="sColor">Цвет</option>
-        </select>
-      </label>
-
-      <div id="bgCuratedBox">
-        <div class="row">
-          <button type="button" id="bgNextBtn" class="btn-ghost" data-i18n="sNextBg">Следующий фон</button>
-          <button type="button" id="bgShuffleBtn" class="btn-ghost" data-i18n="sShuffle">Случайный</button>
-        </div>
-        <label><span data-i18n="sChange">Смена фона</span>
-          <select id="sBgInterval">
-            <option value="0" data-i18n="int0">При каждом открытии</option>
-            <option value="1" data-i18n="int1">Каждую минуту</option>
-            <option value="5" data-i18n="int5">Каждые 5 минут</option>
-            <option value="15" data-i18n="int15">Каждые 15 минут</option>
-            <option value="30" data-i18n="int30">Каждые 30 минут</option>
-            <option value="1440" data-i18n="int1440">Раз в день</option>
-          </select>
-        </label>
-      </div>
-
-      <div id="bgCustomBox" hidden>
-        <label><span data-i18n="sCustomUrls">Свои URL (по одному на строку)</span>
-          <textarea id="sCustomUrls" rows="3" placeholder="https://..."></textarea>
-        </label>
-      </div>
-
-      <div id="bgUploadBox" hidden>
-        <label><span data-i18n="sUploadFile">Файл с компьютера</span>
-          <input type="file" id="sUpload" accept="image/*">
-        </label>
-        <div class="row">
-          <button type="button" id="uploadClear" class="btn-ghost" data-i18n="sUploadClear">Убрать файл</button>
-        </div>
-      </div>
-
-      <div id="bgColorBox" hidden>
-        <label><span data-i18n="sColorVal">Цвет / градиент CSS</span>
-          <input id="sBgValue" placeholder="#14141c или linear-gradient(...)">
-        </label>
-        <div class="presets" id="bgPresets"></div>
-      </div>
-
-      <label><span data-i18n="sBlur">Блюр:</span> <span id="blurVal"></span>
-        <input type="range" id="sBlur" min="0" max="20" step="1">
-      </label>
-      <label><span data-i18n="sDim">Затемнение:</span> <span id="dimVal"></span>
-        <input type="range" id="sDim" min="0" max="80" step="5">
-      </label>
-      </div>
-
-      <div class="set-box">
-      <h4><img class="h-ic" src="assets/icons/theme.svg" alt=""><span data-i18n="sLook">Оформление</span></h4>
-      <label><span data-i18n="sTheme">Тема текста</span>
-        <select id="sTheme">
-          <option value="dark" data-i18n="sThemeDark">Белая (для фото)</option>
-          <option value="light" data-i18n="sThemeLight">Тёмная (для светлого)</option>
-        </select>
-      </label>
-      <label class="check"><input type="checkbox" id="sClock"><span data-i18n="sClock">Показывать часы</span></label>
-      <label><span data-i18n="sLang">Язык</span>
-        <select id="sLang">
-          <option value="auto" data-i18n="sLangAuto">Авто (язык браузера)</option>
-          <option value="ru">Русский</option>
-          <option value="en">English</option>
-        </select>
-      </label>
-      </div>
-
-      <div class="set-box">
-      <h4><img class="h-ic" src="assets/icons/save.svg" alt=""><span data-i18n="sData">Данные</span></h4>
-      <div class="row">
-        <button type="button" id="exportBtn" class="btn-ghost">⇩</button>
-        <button type="button" id="importBtn" class="btn-ghost">⇧</button>
-        <button type="button" id="resetBtn" class="btn-ghost" data-i18n="resetBtn">Сброс</button>
-      </div>
-      <input type="file" id="importFile" accept="application/json" hidden>
-      </div>
-
-      <div class="set-box">
-      <h4><img class="h-ic" src="assets/icons/info.svg" alt=""><span data-i18n="sAbout">О приложении</span></h4>
-      <p class="about">R.Db v1.0.1 — <span data-i18n="aboutText">Локальный рабочий стол новой вкладки. Всё хранится в твоём браузере.</span></p>
-      <div class="row">
-        <a class="btn-ghost" href="https://github.com/DezFix/R.Db" target="_blank" rel="noopener">GitHub</a>
-      </div>
-      </div>
-      <div class="set-box donate">
-      <h4><img class="h-ic" src="assets/icons/heart.svg" alt=""><span data-i18n="donateTitle">Поддержать</span></h4>
-      <p class="about" data-i18n="donateText">Если нравится проект — поддержите разработку</p>
-      <a class="btn-primary" href="https://ko-fi.com/k_k" target="_blank" rel="noopener" data-i18n="kofi">☕ Поддержать на Ko-fi</a>
-      </div>
-    </div>
-    <div class="drawer-foot">
-      <button id="settingsSave" class="btn-primary" data-i18n="done">Готово</button>
-    </div>
-  </aside>
-</div>
-
-<!-- Контекстное меню (правая кнопка) -->
-<div id="ctx" class="ctx" hidden></div>
-
+<script src="icons-index.js"></script>
+<script src="core.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
