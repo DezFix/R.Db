@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "R.Db — homelab desk for the new tab",
   "short_name": "R.Db",
-  "version": "2.1.0",
+  "version": "2.4.0",
   "description": "A minimal homelab-style dashboard in your new tab: bookmark groups with auto icons and titles, widgets, search. No servers, no Docker.",
   "icons": {
     "48": "icons/icon48.png",
@@ -29,11 +29,14 @@
   "permissions": [
     "storage",
     "activeTab",
-    "contextMenus"
+    "contextMenus",
+    "alarms",
+    "declarativeNetRequestWithHostAccess"
   ],
   "optional_permissions": [
     "bookmarks",
-    "topSites"
+    "topSites",
+    "notifications"
   ],
   "host_permissions": [
     "https://api.open-meteo.com/*",
@@ -56,5 +59,8 @@
   },
   "optional_host_permissions": [
     "*://*/*"
-  ]
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self';"
+  }
 }

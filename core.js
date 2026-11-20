@@ -4,6 +4,8 @@
 'use strict';
 
 const ext = G.browser || G.chrome || null;
+// Chrome тоже начал отдавать browser.*, поэтому Firefox узнаём по API, которого в Chrome нет
+const isFirefox = !!(ext && ext.runtime && ext.runtime.getBrowserInfo);
 
 // ---------- утилиты ----------
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
@@ -15,6 +17,9 @@ function normalizeUrl(u) {
   if (!u) return '';
   if (/^[a-z][a-z0-9+.-]*:/i.test(u)) return u; // уже со схемой (http, https, ftp, smb…)
   if (/^(localhost|\d{1,3}(\.\d{1,3}){3})(:\d+)?(\/|$)/i.test(u)) return 'http://' + u;
+  // grafana.lan:3000, nas:5000, pve.home — в локалке почти всегда http
+  const host = u.split(/[/:?#]/)[0];
+  if (isLocalHost(host) && !/\.ts\.net$/i.test(host)) return 'http://' + u;
   return 'https://' + u;
 }
 function parseUrl(u) { try { return new URL(u); } catch { return null; } }
@@ -41,12 +46,17 @@ const DICT = {
     width: 'Ширина', w1: '1 колонка', w2: '2 колонки', w3: '3 колонки', wFull: 'Во всю ширину',
     kLinks: 'Закладки', kNote: 'Заметка', kTodo: 'Список дел', kWeather: 'Погода', kCurrency: 'Курсы валют', kCrypto: 'Крипта',
     kClock: 'Мировое время', kCalendar: 'Календарь', kCountdown: 'Обратный отсчёт', kRss: 'RSS-лента', kIframe: 'Встроенная страница',
-    kGithub: 'Релизы GitHub', kTopsites: 'Часто посещаемые',
+    kGithub: 'Релизы GitHub', kTopsites: 'Часто посещаемые', kServer: 'Сервер (CPU, RAM, диск)',
+    svcSetup: 'Укажи адрес в настройках виджета', svcNet: 'Не удалось подключиться к %s.', svcCert: 'Если там самоподписанный сертификат — открой адрес в браузере и прими его.',
+    svcAuth: 'Сервер не пустил: проверь токен.', svcHttp: 'Сервер ответил ошибкой %s', svcNoAccess: 'Сервер %s отвечает, но у расширения нет доступа к нему — нажми «Дать доступ» и разреши.', svcNetWhy: 'Браузер не достучался до сервера: проверь, что VPN/Tailscale подключён на этом устройстве и адрес открывается во вкладке.', retry: 'Повторить', svcHttpsOnly: 'Если включён режим «Только HTTPS» (в LibreWolf — по умолчанию), он переводит http:// на https://: выключи его в Настройки → Приватность.', free: 'свободно', vmRun: 'ВМ и контейнеры: %s из %s запущено', source: 'Откуда брать', pveToken: 'API-токен',
+    secretNote: 'Токен хранится только в этом браузере — не синхронизируется и не попадает в экспорт.',
+    h_glances: 'Glances в режиме веб-сервера: glances -w (порт 61208).', h_netdata: 'Netdata, порт 19999.',
+    h_proxmox: 'Proxmox → Датацентр → Права → API-токены: создай токен (роль PVEAuditor хватит) и вставь как user@pam!имя=секрет.',
     zones: 'Города / часовые пояса через запятую', zonesHint: 'Europe/Kyiv, Europe/Warsaw, America/New_York',
     events: 'События — по одному на строку: «2026-12-31 Новый год»', feed: 'Адрес RSS или Atom', count: 'Сколько показывать',
     pageUrl: 'Адрес страницы (Grafana, Uptime Kuma, статус…)', height: 'Высота, px', repos: 'Репозитории owner/repo через запятую',
     grant: 'Дать доступ', needAccess: 'Нужен доступ к %s', noAccess: 'Нет доступа', today: 'Сегодня', passed: 'прошло', inDays: 'дн.',
-    noFrame: 'Сайт мог запретить встраивание — тогда откроется пусто', noEvents: 'Добавь события в настройках виджета', widgets: 'Виджеты',
+    noFrame: 'Grafana, Uptime Kuma и др. по умолчанию запрещают встраивание. Расширение попросит доступ к сайту и снимет запрет — только внутри этого виджета.', noEvents: 'Добавь события в настройках виджета', widgets: 'Виджеты',
     city: 'Город', days: 'Дней прогноза', hours: 'Часов прогноза', base: 'Базовая валюта', symbols: 'Валюты', coins: 'Монеты через запятую',
     notePh: 'Пиши здесь…', todoPh: 'Новое дело…', noCity: 'Укажи город в настройках виджета', err: 'Не удалось загрузить',
     emptyGroup: 'Перетащи сюда ссылку или нажми +', emptyBoard: 'Здесь пока пусто',
@@ -71,8 +81,19 @@ const DICT = {
     support: 'Поддержать', photo: 'Фото',
     popTitle: 'Добавить на стол', popAdded: 'Готово!', popOpen: 'Открыть стол', popNoTab: 'Эту страницу добавить нельзя',
     ctxAddPage: 'Добавить страницу на стол R.Db', ctxAddLink: 'Добавить ссылку на стол R.Db',
-    keys: 'Подсказка: / — поиск, Ctrl+V — вставить ссылку, правый клик — меню',
+    keys: 'Клавиши: / — поиск, Пробел — буквы на ссылках (набери и перейдёшь, с Shift — в новой вкладке), 1–9 после пробела или Shift+←/→ — другой стол, Ctrl+V — вставить ссылку, правый клик — меню',
+    board: 'Стол', addBoard: 'Рабочий стол', boardPh: 'Работа, Медиа, Дом…', boardMain: 'Главный', boardFirst: 'Над сеткой появятся вкладки. Группы можно переносить между столами: меню группы или перетащить на вкладку.',
+    rename: 'Переименовать', moveLeft: 'Левее', moveRight: 'Правее', toBoard: 'На другой стол', movedTo: 'Перенесено на «%s»', open: 'Открыть',
     collapse: 'Свернуть', expand: 'Развернуть', moveUp: 'Выше', moveDown: 'Ниже',
+    resize: 'Потяни, чтобы изменить ширину',
+    sAlerts: 'Если сервер упал — даже когда стол закрыт', alOff: 'Ничего', alBadge: 'Число на значке', alNotify: 'Уведомление',
+    alHint: 'Проверка раз в минуту в фоне. На значке расширения — сколько серверов не отвечает.', alNoPerm: 'Нет разрешения на уведомления — оставил число на значке',
+    alDown: 'Не отвечает: %s', alUp: 'Снова в сети: %s', alDownMany: 'Не отвечают: %s', sTheme: 'Тема', thDark: 'Тёмная', thLight: 'Светлая', thAuto: 'Как в системе',
+    cmp: 'Сравнивать с', cmp1: 'Вчера', cmp7: 'Неделя назад', cmp30: 'Месяц назад', was1: 'вчера', was7: 'неделю назад', was30: 'месяц назад', fxDate: 'курс на %s',
+    frameHint: 'Пусто или «отклонено»? Сайт запрещает встраивание.', frameAllow: 'Разрешить встраивание',
+    sPing: 'Проверять, жив ли сервер (кружок у иконки)', pingOff: 'Выкл', pingLocal: 'Локальные', pingAll: 'Все ссылки',
+    pingLink: 'Проверка доступности', pingAuto: 'Авто', pingOn: 'Всегда', pingNever: 'Не проверять',
+    up: 'Онлайн', down: 'Не отвечает', warn: 'Отвечает с ошибкой', checking: 'Проверяю…',
   },
   en: {
     morning: 'Good morning', day: 'Good afternoon', evening: 'Good evening', night: 'Good night',
@@ -89,12 +110,17 @@ const DICT = {
     width: 'Width', w1: '1 column', w2: '2 columns', w3: '3 columns', wFull: 'Full width',
     kLinks: 'Bookmarks', kNote: 'Note', kTodo: 'To-do', kWeather: 'Weather', kCurrency: 'Exchange rates', kCrypto: 'Crypto',
     kClock: 'World clock', kCalendar: 'Calendar', kCountdown: 'Countdown', kRss: 'RSS feed', kIframe: 'Embedded page',
-    kGithub: 'GitHub releases', kTopsites: 'Most visited',
+    kGithub: 'GitHub releases', kTopsites: 'Most visited', kServer: 'Server (CPU, RAM, disk)',
+    svcSetup: 'Set the address in the widget settings', svcNet: 'Could not connect to %s.', svcCert: 'If it uses a self-signed certificate, open the address in the browser and accept it.',
+    svcAuth: 'The server refused: check the token.', svcHttp: 'The server returned error %s', svcNoAccess: 'Server %s answers, but the extension has no access to it — press “Grant access” and allow it.', svcNetWhy: 'The browser could not reach the server: make sure the VPN/Tailscale is connected on this device and the address opens in a tab.', retry: 'Retry', svcHttpsOnly: 'If HTTPS-Only Mode is on (default in LibreWolf), it turns http:// into https://: turn it off in Settings → Privacy.', free: 'free', vmRun: 'VMs and containers: %s of %s running', source: 'Source', pveToken: 'API token',
+    secretNote: 'The token stays in this browser only — not synced and not exported.',
+    h_glances: 'Glances in web server mode: glances -w (port 61208).', h_netdata: 'Netdata, port 19999.',
+    h_proxmox: 'Proxmox → Datacenter → Permissions → API Tokens: create a token (PVEAuditor is enough) and paste it as user@pam!name=secret.',
     zones: 'Time zones, comma separated', zonesHint: 'Europe/London, Europe/Berlin, America/New_York',
     events: 'Events — one per line: “2026-12-31 New Year”', feed: 'RSS or Atom URL', count: 'How many to show',
     pageUrl: 'Page URL (Grafana, Uptime Kuma, status page…)', height: 'Height, px', repos: 'Repositories owner/repo, comma separated',
     grant: 'Grant access', needAccess: 'Needs access to %s', noAccess: 'No access', today: 'Today', passed: 'ago', inDays: 'd',
-    noFrame: 'The site may forbid embedding — it will then stay blank', noEvents: 'Add events in the widget settings', widgets: 'Widgets',
+    noFrame: 'Grafana, Uptime Kuma and others forbid embedding by default. The extension will ask for access to the site and lift the ban — only inside this widget.', noEvents: 'Add events in the widget settings', widgets: 'Widgets',
     city: 'City', days: 'Forecast days', hours: 'Forecast hours', base: 'Base currency', symbols: 'Currencies', coins: 'Coins, comma separated',
     notePh: 'Write here…', todoPh: 'New task…', noCity: 'Set a city in the widget settings', err: 'Failed to load',
     emptyGroup: 'Drop a link here or press +', emptyBoard: 'Nothing here yet',
@@ -119,8 +145,19 @@ const DICT = {
     support: 'Support', photo: 'Photo',
     popTitle: 'Add to desk', popAdded: 'Done!', popOpen: 'Open desk', popNoTab: 'This page can’t be added',
     ctxAddPage: 'Add page to R.Db desk', ctxAddLink: 'Add link to R.Db desk',
-    keys: 'Tip: / — search, Ctrl+V — paste a link, right click — menu',
+    keys: 'Keys: / — search, Space — letters on links (type one to open, with Shift — new tab), 1–9 after Space or Shift+←/→ — another desk, Ctrl+V — paste a link, right click — menu',
+    board: 'Desk', addBoard: 'Desk', boardPh: 'Work, Media, Home…', boardMain: 'Main', boardFirst: 'Tabs will appear above the grid. Move groups between desks via the group menu or by dragging onto a tab.',
+    rename: 'Rename', moveLeft: 'Move left', moveRight: 'Move right', toBoard: 'Move to desk', movedTo: 'Moved to “%s”', open: 'Open',
     collapse: 'Collapse', expand: 'Expand', moveUp: 'Move up', moveDown: 'Move down',
+    resize: 'Drag to change the width',
+    sAlerts: 'When a server goes down — even with the desk closed', alOff: 'Nothing', alBadge: 'Count on the icon', alNotify: 'Notification',
+    alHint: 'Checked every minute in the background. The extension icon shows how many servers are down.', alNoPerm: 'Notifications not allowed — kept the count on the icon',
+    alDown: 'Not responding: %s', alUp: 'Back online: %s', alDownMany: 'Not responding: %s', sTheme: 'Theme', thDark: 'Dark', thLight: 'Light', thAuto: 'System',
+    cmp: 'Compare with', cmp1: 'Yesterday', cmp7: 'A week ago', cmp30: 'A month ago', was1: 'yesterday', was7: 'week ago', was30: 'month ago', fxDate: 'rates for %s',
+    frameHint: 'Blank or “refused to connect”? The site forbids embedding.', frameAllow: 'Allow embedding',
+    sPing: 'Check if servers are up (dot on the icon)', pingOff: 'Off', pingLocal: 'Local', pingAll: 'All links',
+    pingLink: 'Status check', pingAuto: 'Auto', pingOn: 'Always', pingNever: 'Never',
+    up: 'Online', down: 'Not responding', warn: 'Responds with an error', checking: 'Checking…',
   },
 };
 let curLang = null;
@@ -350,23 +387,63 @@ async function fetchMeta(url, signal) {
   } catch { return null; }
 }
 
+// что пинговать: локальные адреса по умолчанию, все ссылки или ничего; у ссылки может быть своё «всегда/никогда»
+function pingTarget(l, settings) {
+  const mode = (settings && settings.ping) || 'local';
+  if (mode === 'off' || !l || l.ping === false) return '';
+  const u = parseUrl(l.url);
+  if (!u || !/^https?:$/.test(u.protocol)) return '';
+  if (l.ping === true || mode === 'all' || isLocalHost(u.hostname)) return u.href;
+  return '';
+}
+async function pingUrl(url, timeout = 6000) {
+  const ctl = new AbortController();
+  const tm = setTimeout(() => ctl.abort(), timeout);
+  const t0 = Date.now();
+  try {
+    const r = await fetch(url, { method: 'HEAD', mode: 'no-cors', cache: 'no-store', credentials: 'omit', signal: ctl.signal });
+    return { s: r.type !== 'opaque' && r.status >= 500 ? 'warn' : 'up', ms: Date.now() - t0, code: r.type === 'opaque' ? 0 : r.status, t: Date.now() };
+  } catch { return { s: 'down', ms: 0, t: Date.now() }; } finally { clearTimeout(tm); }
+}
+
 // ---------- модель ----------
 const ACCENTS = ['#7c8cff', '#5ec2b7', '#f2a65a', '#ef6f88', '#a78bfa', '#7fbf6a', '#e6e6e6'];
 const BG_PRESETS = [
   'linear-gradient(135deg,#0f2027,#203a43,#2c5364)', 'linear-gradient(135deg,#1a1a2e,#16213e,#0f3460)',
   'linear-gradient(135deg,#232526,#414345)', 'linear-gradient(135deg,#2b1055,#7597de)', 'linear-gradient(135deg,#134e5e,#71b280)', '#0d1117', '#16161d',
+  'linear-gradient(135deg,#e0eafc,#cfdef3)', 'linear-gradient(135deg,#fdfbfb,#ebedee)', '#eef1f5',
 ];
+// подборка Unsplash: только пейзажи (горы, лес, море, небо), каждое фото проверено вручную
 const CURATED = [
   '1506905925346-21bda4d32df4', '1469474968028-56623f02e42e', '1447752875215-b2761acb3c5d', '1507525428034-b723cf961d3e',
   '1519681393784-d120267933ba', '1470071459604-3b5ec3a7fe05', '1501785888041-af3ef285b470', '1518837695005-2083093ee35b',
   '1500530855697-b586d89ba3ee', '1493246507139-91e8fad9978e', '1464822759023-fed622ff2c3b', '1454496522488-7a8e488e8606',
+  '1441974231531-c6227db76b6e', '1472214103451-9374bd1c798e', '1501854140801-50d01698950b', '1426604966848-d7adac402bff',
+  '1433086966358-54859d0ed716', '1475924156734-496f6cac6ec1', '1500534314209-a25ddb2bd429', '1505765050516-f72dcac9c60e',
+  '1490750967868-88aa4486c946', '1439066615861-d1af74d74000', '1418065460487-3e41a6c84dc5', '1497436072909-60f360e1d4b1',
+  '1470770841072-f978cf4d019e', '1465146344425-f00d5f5c8f07', '1482192596544-9eb780fc7f66', '1431794062232-2a99a5431c6c',
+  '1494500764479-0c8f2919a3d8', '1506744038136-46273834b3fb', '1508739773434-c26b3d09e071', '1510784722466-f2aa9c52fff6',
+  '1511884642898-4c92249e20b6', '1513836279014-a89f7a76ae86', '1414609245224-afa02bfb3fda', '1444703686981-a3abbc4d4fe3',
+  '1462331940025-496dfbfc7564', '1419242902214-272b3f66ee7a', '1502082553048-f009c37129b9', '1473773508845-188df298d2d1',
+  '1504608524841-42fe6f032b4b', '1500964757637-c85e8a162699', '1509316975850-ff9c5deb0cd9', '1528184039930-bd03972bd974',
+  '1532274402911-5a369e4c4bb5', '1542224566-6e85f2e6772f', '1536431311719-398b6704d4cc', '1517299321609-52687d1bc55a', '1477346611705-65d1883cee1e',
+  '1485470733090-0aae1788d5af', '1534088568595-a066f410bcda', '1499002238440-d264edd596ec', '1486870591958-9b9d0d1dda99',
+  '1491466424936-e304919aada7', '1520962922320-2038eebab146', '1476514525535-07fb3b4ae5f1', '1507041957456-9c397ce39c97',
+  '1433838552652-f9a46b332c40', '1500622944204-b135684e99fd', '1503614472-8c93d56e92ce', '1529963183134-61a90db47eaf', '1544735716-392fe2489ffa',
+  '1546587348-d12660c30c50', '1558979158-65a1eaa08691', '1559827260-dc66d52bef19', '1505142468610-359e7d316be0', '1510414842594-a61c69b5ae57',
+  '1468276311594-df7cb65d8df6', '1455218873509-8097305ee378', '1440342359743-84fcb8c21f21', '1488866022504-f2584929ca5f',
+  '1484402628941-0bb40fc029e7', '1510798831971-661eb04b3739', '1480497490787-505ec076689f', '1445543949571-ffc3e0e2f55e',
+  '1451187580459-43490279c0fa', '1531366936337-7c912a4589a7', '1473448912268-2022ce9509d8', '1516214104703-d870798883c5',
+  '1511497584788-876760111969', '1500382017468-9049fed747ef', '1542273917363-3b1817f69a2d', '1547036967-23d11aacaee0', '1523712999610-f77fbcfc3843',
+  '1540206395-68808572332f', '1536257104079-aa99c6460a5a', '1519046904884-53103b34b206', '1414490929659-9a12b7e31907', '1446329813274-7c9036bd9a1f',
+  '1489447068241-b3490214e879', '1512273222628-4daea6e55abb',
 ].map((id) => `https://images.unsplash.com/photo-${id}?q=80&w=1920&auto=format&fit=crop`);
 
 function defaultSettings() {
   return {
-    lang: 'auto', name: '', showClock: true, showSearch: true, showDesc: true,
+    lang: 'auto', theme: 'dark', name: '', showClock: true, showSearch: true, showDesc: true,
     accent: ACCENTS[0], density: 'comfortable', maxw: 'normal', cols: 0,
-    engine: 'google', engineCustom: '', newTab: false, lock: false, sync: true,
+    engine: 'google', engineCustom: '', newTab: false, lock: false, sync: true, ping: 'local', alerts: 'off',
     bg: { mode: 'curated', blur: 0, dim: 30, interval: 1440, index: Math.floor(Math.random() * CURATED.length), lastChange: 0, urls: [], color: BG_PRESETS[0] },
   };
 }
@@ -405,9 +482,10 @@ function newGroup(kind, title) {
   if (kind === 'iframe') { g.url = ''; g.height = 320; }
   if (kind === 'github') g.repos = ['immich-app/immich', 'home-assistant/core', 'jellyfin/jellyfin'];
   if (kind === 'topsites') g.count = 8;
+  if (kind === 'server') { g.url = ''; g.source = 'glances'; }
   return g;
 }
-const KINDS = ['links', 'note', 'todo', 'weather', 'currency', 'crypto', 'clock', 'calendar', 'countdown', 'rss', 'iframe', 'github', 'topsites'];
+const KINDS = ['links', 'note', 'todo', 'server', 'weather', 'currency', 'crypto', 'clock', 'calendar', 'countdown', 'rss', 'iframe', 'github', 'topsites'];
 const WIDGETS = KINDS.slice(1);
 // приводим любое состояние к рабочему виду (защита от кривого импорта)
 function sanitize(s) {
@@ -417,15 +495,20 @@ function sanitize(s) {
   s.ts = +s.ts || Date.now();
   s.settings = Object.assign(d, s.settings || {});
   s.settings.bg = Object.assign(defaultSettings().bg, (s.settings && s.settings.bg) || {});
+  s.boards = (Array.isArray(s.boards) ? s.boards : []).filter((b) => b && b.id).map((b) => ({ id: String(b.id), title: String(b.title || '').slice(0, 30) }));
+  if (!s.boards.length) s.boards = [{ id: 'main', title: '' }];
+  const bids = new Set(s.boards.map((b) => b.id));
   s.groups = s.groups.filter((g) => g && KINDS.includes(g.kind)).map((g) => {
     const base = newGroup(g.kind);
     const out = Object.assign(base, g);
     out.id = out.id || uid();
     out.span = clamp(+out.span || 1, 1, 4);
+    if (!bids.has(out.board)) out.board = s.boards[0].id;
     if (out.kind === 'links') {
       out.items = (Array.isArray(out.items) ? out.items : []).filter((l) => l && l.url).map((l) => ({
         id: l.id || uid(), title: String(l.title || titleFromUrl(l.url)), url: String(l.url),
         ...(l.desc ? { desc: String(l.desc) } : {}), ...(l.icon ? { icon: String(l.icon) } : {}), ...(l.fav ? { fav: String(l.fav) } : {}),
+        ...(typeof l.ping === 'boolean' ? { ping: l.ping } : {}),
       }));
       if (!['tiles', 'list', 'compact'].includes(out.view)) out.view = 'tiles';
     }
@@ -519,7 +602,7 @@ const store = {
       s = migrateV1(old);
       migrated = !!s;
     }
-    s = sanitize(s) || defaultState();
+    s = sanitize(s) || sanitize(defaultState());
     setLang(s.settings.lang);
     return { state: s, migrated };
   },
@@ -582,8 +665,8 @@ const store = {
 };
 
 G.RDB = {
-  ext, uid, clamp, norm, normalizeUrl, parseUrl, isLocalHost, t, setLang, lang: () => curLang || detectLang(),
+  ext, isFirefox, uid, clamp, norm, normalizeUrl, parseUrl, isLocalHost, t, setLang, lang: () => curLang || detectLang(),
   iconIndex, iconRecUrl, iconRef, iconFromRef, searchIcons, guessApp, prettyName, titleFromUrl, iconCandidates, letterOf, hueOf,
-  cleanTitle, fetchMeta, ACCENTS, BG_PRESETS, CURATED, defaultState, newGroup, sanitize, migrateV1, store, KINDS, WIDGETS,
+  cleanTitle, fetchMeta, pingTarget, pingUrl, ACCENTS, BG_PRESETS, CURATED, defaultState, newGroup, sanitize, migrateV1, store, KINDS, WIDGETS,
 };
 })(typeof globalThis !== 'undefined' ? globalThis : self);

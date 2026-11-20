@@ -40,7 +40,8 @@ const $ = (s) => document.querySelector(s);
   const groups = state.groups.filter((g) => g.kind === 'links');
   const sel = $('#group');
   if (!groups.length) sel.append(new Option(t('inbox'), ''));
-  groups.forEach((g) => sel.append(new Option(g.title || t('untitled'), g.id)));
+  const bname = (id) => { const b = state.boards.find((x) => x.id === id); return b ? (b.title || t('board') + ' ' + (state.boards.indexOf(b) + 1)) : ''; };
+  groups.forEach((g) => sel.append(new Option((state.boards.length > 1 ? bname(g.board) + ' / ' : '') + (g.title || t('untitled')), g.id)));
   const last = localStorage.getItem('rdb2_lastGroup');
   if (last && groups.some((g) => g.id === last)) sel.value = last;
 

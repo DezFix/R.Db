@@ -19,18 +19,22 @@ No Docker, no server, no account: everything lives in your browser.
   - `Ctrl+V` a link on the desk (it goes into the group under your cursor);
   - drag a link from the address bar or another page onto a group;
   - import a whole folder from browser bookmarks.
-- **12 widgets:**
+- **Desks:** several boards as tabs above the grid (Home, Work, Media…). Move a group to another desk from its menu or by dragging it onto a tab.
+- **13 widgets:**
+  - **server** — CPU, RAM, disks and uptime from Glances, Netdata or Proxmox (all nodes, running VMs/containers);
   - weather with hourly and daily forecast (Open-Meteo);
-  - exchange rates with daily change, crypto (CoinGecko);
+  - exchange rates with the previous value and change in amount and % — vs yesterday, a week or a month ago ([exchange-api](https://github.com/fawazahmed0/exchange-api)), crypto (CoinGecko);
   - world clock (`Home=Europe/Kyiv` for custom labels), calendar, countdown to dates;
   - RSS/Atom feed — access is asked only for that one site;
-  - embedded page (Grafana panel, Uptime Kuma status page, anything that allows framing);
+  - embedded page (Grafana, Uptime Kuma…; YouTube and Vimeo links turn into the player). Sites that forbid framing (`X-Frame-Options`) work too: grant access to that one site and the extension drops the header, only for frames inside its own page;
   - GitHub releases — latest versions of the apps you self-host, fresh ones highlighted;
   - most visited sites (right-click one to pin it to a group);
   - notes and to-do lists.
+- **Keyboard:** `Space` puts letters on every visible link — type one to open it (`Shift` — in a new tab); `Space`, `1–9` or `Shift+←/→` switch desks.
 - **Search:** type anywhere, or press `/`. It searches your bookmarks first, then the web (Google, DuckDuckGo, Bing, Yandex, Brave, Startpage, Perplexity or your own URL).
-- **Drag & drop** for links and groups, a right-click menu everywhere, undo after delete, layout lock.
-- **Look:** Unsplash photos, your own image links or file, colors and gradients; blur, dimming, accent color, density, page width, column count.
+- **Server status:** a small dot on the icon — green is up, red is down (checked every minute while the tab is visible). By default only local addresses are checked; switch to *All links* or *Off* in settings, or per bookmark. Optionally the check also runs in the background: the extension icon shows how many servers are down, or you get a notification when one goes down and comes back.
+- **Drag & drop:** grab a group by its header — the others make room as you move, `Esc` cancels; drag a group's right edge to change its width. Links can be dragged between groups. Right-click menu everywhere, undo after delete, layout lock.
+- **Look:** dark, light or system theme; 90+ hand-picked Unsplash landscapes shown in random order without repeats, your own image links or file, colors and gradients; blur, dimming, accent color, density, page width, column count.
 - **Sync** via your browser account (Chrome Sync / Firefox Sync), JSON export/import, RU/EN.
 - **Upgrade from R.Db 1.x** is automatic: folders become groups, loose links go into *Bookmarks*, and widgets carry over.
 
@@ -60,10 +64,14 @@ Chrome a service worker) plus ready-to-upload zips. The `release/` folder is git
 | `contextMenus` | *Add to R.Db desk* in the right-click menu |
 | `bookmarks` (optional) | asked only when you press *From browser bookmarks* |
 | `topSites` (optional) | asked only when you add the *Most visited* widget |
-| any site (optional) | asked per site, only for an RSS feed you add |
+| any site (optional) | asked per site, only for an RSS feed, an embedded page or a server widget you add |
+| `declarativeNetRequestWithHostAccess` | for sites you granted, only inside R.Db: removes `X-Frame-Options` / CSP for embedded pages and the `Origin` header of widget requests (many panels reject a foreign one as CSRF) |
+| `webRequest`, `webRequestBlocking` (Firefox build only) | the same for Firefox, where it is more reliable |
+| `alarms` | the background status check, only if you turn it on |
+| `notifications` (optional) | asked only when you pick *Notification* for downed servers |
 | open-meteo, er-api, coingecko, microlink, api.github.com | weather, rates, crypto, page titles, releases |
 
-There are no status/ping checks on purpose, so the extension never needs access to all sites.
+The status dot needs no permissions: it sends a `HEAD` request in `no-cors` mode, which tells only whether the server answered. A self-signed HTTPS certificate counts as *down* until you open the site once and accept it in the browser.
 
 ## Files
 
@@ -80,12 +88,15 @@ No build step — plain HTML/CSS/JS.
 
 ## Notes
 
+- The Proxmox API token of the server widget is stored only in this browser (`storage.local`): they are not synced and not included in the JSON export. On another device, enter them again.
+- Proxmox with a self-signed certificate: open its address in the browser once and accept the certificate, otherwise the widget and the status dot can't reach it.
+
 - Sync quota is ~100 KB. A large desk, or icons uploaded as files, can exceed it: the desk then stays local only. Use links instead of files and you'll be fine. A background image uploaded as a file is never synced.
 - Weather, rates and icons are cached locally, so a new tab doesn't hit the network every time.
 
 ## Privacy
 
-Your links, notes and settings stay in your browser's storage. The network is used only for backgrounds, icons, weather, rates, crypto, page titles (microlink, public URLs only), GitHub releases and the RSS feeds you add. No accounts, no telemetry.
+Your links, notes and settings stay in your browser's storage. The network is used only for backgrounds, icons, weather, rates (exchange-api via jsDelivr), crypto, page titles (microlink, public URLs only), GitHub releases and the RSS feeds you add. No accounts, no telemetry.
 
 ## Attribution
 

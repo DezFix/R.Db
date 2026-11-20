@@ -23,6 +23,8 @@ for target in ('firefox', 'chrome'):
     m = json.loads(json.dumps(base))
     if target == 'firefox':
         m['background'] = {'scripts': ['core.js', 'bg.js']}
+        # встраивание сайтов, запрещающих фреймы: в Firefox надёжнее блокирующий webRequest
+        m['permissions'] = m['permissions'] + ['webRequest', 'webRequestBlocking']
     else:
         m['background'] = {'service_worker': 'bg.js'}
         m.pop('browser_specific_settings', None)

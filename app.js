@@ -57,6 +57,9 @@ const ICON = {
   star: '<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/>',
   note: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>',
   coin: '<circle cx="12" cy="12" r="9"/><path d="M14.5 9.5c-.5-1-1.5-1.5-2.5-1.5-1.5 0-2.5.8-2.5 2s1 1.7 2.5 2 2.5.8 2.5 2-1 2-2.5 2c-1 0-2-.5-2.5-1.5M12 6v2M12 16v2"/>',
+  server: '<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>',
+  pulse: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+  play: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="m10 9 5 3-5 3z"/>',
   cash: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/>',
 };
 const svg = (name, cls = 'i') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[name] || ''}</svg>`;
@@ -74,17 +77,18 @@ function findLink(id) {
   for (const g of state.groups) if (g.kind === 'links') { const i = g.items.findIndex((l) => l.id === id); if (i >= 0) return { g, i, l: g.items[i] }; }
   return null;
 }
-function linkGroups() { return state.groups.filter((g) => g.kind === 'links'); }
+function linkGroups() { const l = state.groups.filter((g) => g.kind === 'links'); return [...l.filter(onBoard), ...l.filter((g) => !onBoard(g))]; }
 function ensureLinkGroup(preferId) {
   const g = (preferId && findGroup(preferId)) || linkGroups()[0];
   if (g && g.kind === 'links') return g;
   const ng = R.newGroup('links', t('inbox'));
+  ng.board = curBoard();
   state.groups.unshift(ng);
   return ng;
 }
 function kindIcon(kind) {
   return { links: 'link', note: 'note', todo: 'check', weather: 'widget', currency: 'cash', crypto: 'coin', clock: 'clock', calendar: 'cal',
-    countdown: 'timer', rss: 'rss', iframe: 'frame', github: 'tag', topsites: 'star' }[kind] || 'group';
+    countdown: 'timer', rss: 'rss', iframe: 'frame', github: 'tag', topsites: 'star', server: 'server' }[kind] || 'group';
 }
 const kName = (k) => t('k' + k[0].toUpperCase() + k.slice(1));
 
@@ -92,7 +96,8 @@ const kName = (k) => t('k' + k[0].toUpperCase() + k.slice(1));
 const cache = (() => {
   let c = {};
   try { c = JSON.parse(localStorage.getItem('rdb2_cache') || '{}') || {}; } catch {}
-  c.icon = c.icon || {}; c.wx = c.wx || {}; c.geo = c.geo || {}; c.fx = c.fx || {}; c.fxHist = c.fxHist || {}; c.cr = c.cr || {};
+  c.icon = c.icon || {}; c.wx = c.wx || {}; c.geo = c.geo || {}; c.cr = c.cr || {};
+  delete c.fx; delete c.fxHist; // старый формат курсов (до 2.2)
   let tm = 0;
   return { c, save() { clearTimeout(tm); tm = setTimeout(() => { try { localStorage.setItem('rdb2_cache', JSON.stringify(c)); } catch {} }, 400); } };
 })();
@@ -148,19 +153,29 @@ function bgUrls() {
 }
 async function showBg(force) {
   const b = state.settings.bg;
-  $('#dim').style.background = `rgba(6,8,12,${b.dim / 100})`;
+  $('#dim').style.background = `rgba(${themeNow() === 'light' ? '236,239,245' : '6,8,12'},${b.dim / 100})`;
   document.documentElement.style.setProperty('--bg-blur', b.blur + 'px');
   const credit = $('#credit');
   credit.hidden = true;
   if (b.mode === 'color') return paintBg(b.color || R.BG_PRESETS[0], false);
   if (b.mode === 'upload') { const f = await store.getBgFile(); return paintBg(f ? `url("${f}")` : R.BG_PRESETS[0], !!f); }
   const list = bgUrls();
-  if (bgLocal.index == null) bgLocal.index = b.index || 0;
   const iv = +b.interval;
   const due = force || iv === 0 || (iv > 0 && Date.now() - (bgLocal.last || 0) > iv * 60e3);
-  if (due && (bgLocal.last || force || iv === 0)) bgLocal.index = (bgLocal.index + 1) % list.length;
+  let url = bgLocal.url;
+  if (!url || !list.includes(url) || (due && (bgLocal.last || force || iv === 0))) {
+    // случайное фото, но не из недавно показанных: помним последнюю половину подборки
+    const recent = (bgLocal.recent || []).filter((u) => list.includes(u));
+    const others = list.filter((u) => u !== url);
+    const unseen = others.filter((u) => !recent.includes(u));
+    const pick = unseen.length ? unseen : others.length ? others : list;
+    url = pick[Math.floor(Math.random() * pick.length)];
+    bgLocal.recent = [url, ...recent].slice(0, Math.floor(list.length / 2));
+    bgLocal.url = url;
+    delete bgLocal.index;
+  }
   if (due) { bgLocal.last = Date.now(); bgLocalSave(); }
-  const url = list[bgLocal.index % list.length];
+  else bgLocalSave();
   if (b.mode === 'curated') {
     credit.hidden = false;
     credit.textContent = `${t('photo')}: Unsplash`;
@@ -223,8 +238,16 @@ function tick() {
 }
 
 // ---------- раскладка ----------
+// тема: тёмная, светлая или как в системе
+const darkMQ = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+function themeNow() {
+  const th = (state && state.settings.theme) || 'dark';
+  return th === 'auto' ? (darkMQ && !darkMQ.matches ? 'light' : 'dark') : th;
+}
+if (darkMQ) darkMQ.addEventListener('change', () => { if (state && state.settings.theme === 'auto') { applySettings(); showBgFilters(); } });
 function applySettings() {
   const s = state.settings;
+  document.documentElement.dataset.theme = themeNow();
   R.setLang(s.lang);
   document.documentElement.lang = R.lang();
   const root = document.documentElement.style;
@@ -263,11 +286,15 @@ window.addEventListener('resize', () => { const c = cols; computeCols(); if (c !
 function render() {
   const grid = $('#grid');
   ro.disconnect();
+  clearLive();
   computeCols();
-  grid.replaceChildren(...state.groups.map(groupEl));
+  renderBoards();
+  const vis = visibleGroups();
+  grid.replaceChildren(...vis.map(groupEl));
   grid.querySelectorAll('.card').forEach((c) => { packCard(c); ro.observe(c.firstElementChild); });
-  $('#emptyBoard').hidden = state.groups.length > 0;
+  $('#emptyBoard').hidden = vis.length > 0;
   loadWidgets();
+  paintPings();
 }
 
 // ---------- группы ----------
@@ -275,15 +302,14 @@ function groupEl(g) {
   const span = g.span >= 4 ? cols : Math.min(g.span || 1, cols);
   const card = h('section', { class: `card k-${g.kind}` + (g.collapsed ? ' collapsed' : ''), 'data-gid': g.id, style: { gridColumn: `span ${span}` } });
   const inner = h('div', { class: 'card-in' });
-  const head = h('header', { class: 'card-head', draggable: !state.settings.lock },
+  const head = h('header', { class: 'card-head' },
     h('button', { class: 'card-title', text: g.title || t('k' + g.kind[0].toUpperCase() + g.kind.slice(1)), title: g.collapsed ? t('expand') : t('collapse'),
       onclick: () => { g.collapsed = !g.collapsed; save(); } }),
     h('span', { class: 'card-tools' },
       g.kind === 'links' ? h('button', { class: 'tool', title: t('addLink'), html: svg('plus'), onclick: () => openLinkDialog({ groupId: g.id }) }) : null,
       h('button', { class: 'tool', title: t('edit'), html: svg('dots'), onclick: (e) => openMenu(e.currentTarget, groupMenu(g)) })));
   head.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); openMenuAt(e.clientX, e.clientY, groupMenu(g)); });
-  head.addEventListener('dragstart', (e) => { if (state.settings.lock) return e.preventDefault(); drag = { type: 'group', id: g.id }; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/x-rdb', g.id); card.classList.add('dragging'); });
-  head.addEventListener('dragend', () => { card.classList.remove('dragging'); clearDrop(); drag = null; });
+  head.addEventListener('pointerdown', (e) => startGroupDrag(e, card));
   const body = h('div', { class: 'card-body' });
   if (!g.collapsed) {
     if (g.kind === 'links') linksBody(g, body);
@@ -292,6 +318,11 @@ function groupEl(g) {
     else body.append(h('div', { class: 'w-load', 'data-wid': g.id }, h('span', { class: 'spinner' })));
   }
   inner.append(head, body);
+  if (!state.settings.lock) {
+    const grip = h('span', { class: 'card-resize', title: t('resize') });
+    grip.addEventListener('pointerdown', (e) => startResize(e, g, card));
+    inner.append(grip);
+  }
   card.append(inner);
   card.addEventListener('dragover', (e) => onDragOver(e, g, card));
   card.addEventListener('dragleave', (e) => { if (!card.contains(e.relatedTarget)) clearDrop(); });
@@ -310,8 +341,12 @@ function groupMenu(g) {
     items.push({ sep: true });
   }
   items.push({ icon: 'edit', label: t('edit'), run: () => openGroupDialog({ group: g }) });
-  if (i > 0) items.push({ icon: 'up', label: t('moveUp'), run: () => { state.groups.splice(i, 1); state.groups.splice(i - 1, 0, g); save(); } });
-  if (i < state.groups.length - 1) items.push({ icon: 'down', label: t('moveDown'), run: () => { state.groups.splice(i, 1); state.groups.splice(i + 1, 0, g); save(); } });
+  const vis = visibleGroups(), vi = vis.indexOf(g);
+  const swap = (o) => { const j = state.groups.indexOf(o); state.groups[i] = o; state.groups[j] = g; save(); };
+  if (vi > 0) items.push({ icon: 'up', label: t('moveUp'), run: () => swap(vis[vi - 1]) });
+  if (vi >= 0 && vi < vis.length - 1) items.push({ icon: 'down', label: t('moveDown'), run: () => swap(vis[vi + 1]) });
+  const others = state.boards.filter((b) => b.id !== g.board);
+  if (others.length) items.push({ icon: 'move', label: t('toBoard'), sub: others.map((b) => ({ label: boardName(b), run: () => moveGroupToBoard(g, b.id) })) });
   items.push({ icon: 'trash', label: t('del'), danger: true, run: () => removeGroup(g) });
   return items;
 }
@@ -320,6 +355,7 @@ function removeGroup(g) {
   if (i < 0) return;
   state.groups.splice(i, 1);
   save();
+  if (['iframe', 'server'].includes(g.kind)) setTimeout(() => { if (!state.groups.includes(g)) syncFrameRules(); }, 6000); // после окна «Отменить»
   toast(t('deleted') + ': ' + (g.title || t('k' + g.kind[0].toUpperCase() + g.kind.slice(1))), t('undo'), () => { state.groups.splice(i, 0, g); save(); });
 }
 
@@ -333,7 +369,9 @@ function linksBody(g, body) {
 function linkEl(l, g) {
   const a = h('a', { class: 'lnk', href: l.url, 'data-lid': l.id, draggable: !state.settings.lock, title: l.url });
   if (state.settings.newTab) { a.target = '_blank'; a.rel = 'noopener'; }
-  a.append(iconBox(l));
+  const pu = pingUrlOf(l);
+  if (pu) { a.append(h('span', { class: 'ic-wrap' }, iconBox(l), h('span', { class: 'ping', 'data-purl': pu }))); a.dataset.purl = pu; }
+  else a.append(iconBox(l));
   const txt = h('span', { class: 'lnk-txt' }, h('span', { class: 'lnk-title', text: l.title }));
   if (l.desc && g.view === 'list') txt.append(h('span', { class: 'lnk-desc', text: l.desc }));
   a.append(txt);
@@ -404,6 +442,64 @@ async function enrich(l, wantTitle) {
   if (changed) save(); else render();
 }
 
+// ---------- пинг: живой ли сервер ----------
+// fetch в режиме no-cors не требует доступа к сайту: ответ «непрозрачный», но если сервер ответил хоть чем-то — он жив.
+// Отказ соединения, таймаут, не тот DNS или битый сертификат — fetch падает с ошибкой.
+const PING_EVERY = 60e3, PING_TIMEOUT = 6000;
+const pings = (() => { try { return JSON.parse(localStorage.getItem('rdb2_ping') || '{}') || {}; } catch { return {}; } })();
+let pingTimer = 0, pingRun = null;
+function pingUrlOf(l) { return R.pingTarget(l, state.settings); }
+const pingOne = (url) => R.pingUrl(url, PING_TIMEOUT);
+function pingLabel(p) {
+  if (!p) return t('checking');
+  if (p.s === 'up') return `${t('up')} · ${p.ms} ${R.lang() === 'ru' ? 'мс' : 'ms'}`;
+  if (p.s === 'warn') return `${t('warn')}${p.code ? ' ' + p.code : ''}`;
+  return t('down');
+}
+function paintPings() {
+  document.querySelectorAll('.lnk[data-purl]').forEach((a) => {
+    const p = pings[a.dataset.purl];
+    const ok = p && Date.now() - p.t < 10 * 60e3;
+    const dot = a.querySelector('.ping');
+    if (dot) dot.dataset.s = ok ? p.s : 'wait';
+    const txt = a.getAttribute('href') + '\n● ' + pingLabel(ok ? p : null);
+    if (a.title !== txt) a.title = txt;
+  });
+  schedulePings();
+}
+async function runPings() {
+  if (pingRun) return pingRun;
+  pingRun = (async () => {
+    const urls = Array.from(new Set(Array.from(document.querySelectorAll('.lnk[data-purl]'), (a) => a.dataset.purl)));
+    let i = 0;
+    const worker = async () => {
+      while (i < urls.length) {
+        const u = urls[i++];
+        pings[u] = await pingOne(u);
+        paintPings();
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(6, urls.length) }, worker));
+    // старые адреса не копим
+    const keep = new Set(urls);
+    Object.keys(pings).forEach((k) => { if (!keep.has(k) && Date.now() - pings[k].t > 864e5) delete pings[k]; });
+    try { localStorage.setItem('rdb2_ping', JSON.stringify(pings)); } catch {}
+  })();
+  try { await pingRun; } finally { pingRun = null; }
+}
+function schedulePings() {
+  if (pingTimer || document.hidden) return;
+  const urls = Array.from(document.querySelectorAll('.lnk[data-purl]'), (a) => a.dataset.purl);
+  if (!urls.length) return;
+  // сразу проверяем то, что давно не проверяли; дальше — раз в минуту, пока вкладка на экране
+  const oldest = Math.min(...urls.map((u) => (pings[u] ? pings[u].t : 0)));
+  const wait = clamp(oldest + PING_EVERY - Date.now(), 300, PING_EVERY);
+  pingTimer = setTimeout(async () => { pingTimer = 0; if (!document.hidden) await runPings(); schedulePings(); }, wait);
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { clearTimeout(pingTimer); pingTimer = 0; } else schedulePings();
+});
+
 // ---------- заметка и дела ----------
 function noteBody(g, body) {
   const ta = h('textarea', { class: 'note', placeholder: t('notePh'), value: g.text || '', spellcheck: false });
@@ -443,7 +539,7 @@ function loadWidgets() {
     const el = $(`.w-load[data-wid="${g.id}"]`);
     if (!el) return;
     const fn = { weather: wWeather, currency: wCurrency, crypto: wCrypto, clock: wClock, calendar: wCalendar, countdown: wCountdown,
-      rss: wRss, iframe: wIframe, github: wGithub, topsites: wTopsites }[g.kind];
+      rss: wRss, iframe: wIframe, github: wGithub, topsites: wTopsites, server: wServer }[g.kind];
     if (fn) fn(g, el).catch((e) => { console.warn(e); el.replaceChildren(h('div', { class: 'w-msg', text: t('err') })); });
   });
 }
@@ -498,33 +594,86 @@ async function wWeather(g, el) {
   }
   el.replaceChildren(...out);
 }
-const CUR_SYM = { USD: '$', EUR: '€', UAH: '₴', GBP: '£', PLN: 'zł', JPY: '¥', CNY: '¥', CHF: '₣', CZK: 'Kč', RUB: '₽', KZT: '₸', TRY: '₺', GEL: '₾' };
-const CURRENCIES = ['USD', 'EUR', 'UAH', 'RUB', 'GBP', 'PLN', 'CHF', 'JPY', 'CNY', 'CZK', 'SEK', 'NOK', 'CAD', 'AUD', 'KZT', 'TRY', 'GEL', 'BYN', 'ILS', 'INR'];
+const CUR_SYM = { USD: '$', EUR: '€', UAH: '₴', GBP: '£', PLN: 'zł', JPY: '¥', CNY: '¥', CHF: '₣', CZK: 'Kč', RUB: '₽', KZT: '₸', TRY: '₺', GEL: '₾',
+  INR: '₹', ILS: '₪', KRW: '₩', AZN: '₼', AMD: '֏', BYN: 'Br' };
+const CURRENCIES = ['USD', 'EUR', 'UAH', 'RUB', 'GBP', 'PLN', 'CHF', 'JPY', 'CNY', 'CZK', 'SEK', 'NOK', 'CAD', 'AUD', 'KZT', 'TRY', 'GEL', 'BYN', 'ILS', 'INR',
+  'MDL', 'AZN', 'AMD', 'UZS', 'HUF', 'RON', 'BGN', 'KRW', 'AED'];
+// курсы с историей по датам, без ключа: fawazahmed0/exchange-api (jsDelivr, запасной зеркальный хост на Cloudflare)
+async function fxDay(base, date) {
+  const b = base.toLowerCase();
+  for (const u of [`https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${date}/v1/currencies/${b}.json`,
+    `https://${date}.currency-api.pages.dev/v1/currencies/${b}.json`]) {
+    try {
+      const r = await fetch(u);
+      if (!r.ok) continue;
+      const j = await r.json();
+      if (!j[b]) continue;
+      const rates = {};
+      CURRENCIES.forEach((c) => { const v = j[b][c.toLowerCase()]; if (v) rates[c] = v; }); // храним только нужное — кэш маленький
+      return { date: j.date, rates };
+    } catch {}
+  }
+  return null;
+}
+function shiftDate(iso, days) { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - days); return d.toISOString().slice(0, 10); }
 async function wCurrency(g, el) {
   const base = g.base || 'USD';
-  let rec = cache.c.fx[base];
-  if (!fresh(rec, 180)) {
-    const r = await fetch(`https://open.er-api.com/v6/latest/${base}`);
-    const j = await r.json();
-    if (j.result !== 'success') throw new Error('fx');
-    rec = { t: Date.now(), rates: j.rates };
-    cache.c.fx[base] = rec;
+  const back = [1, 7, 30].includes(+g.cmp) ? +g.cmp : 1;
+  const fx = cache.c.fx2 || (cache.c.fx2 = {});
+  const days = cache.c.fxDays || (cache.c.fxDays = {});
+  let cur = fx[base];
+  if (!fresh(cur, 180)) {
+    const r = await fxDay(base, 'latest');
+    if (r) cur = fx[base] = { t: Date.now(), ...r };
+    else if (!cur) {
+      // запасной вариант — старый источник, только текущий курс без истории
+      const j = await (await fetch(`https://open.er-api.com/v6/latest/${base}`)).json();
+      if (j.result !== 'success') throw new Error('fx');
+      cur = { t: Date.now() - 170 * 60e3, date: '', rates: j.rates };
+    }
   }
-  // вчерашние значения — для стрелки изменения
-  const today = new Date().toISOString().slice(0, 10);
-  const hist = cache.c.fxHist[base] || (cache.c.fxHist[base] = {});
-  const rows = (g.symbols || []).filter((s) => s !== base && rec.rates[s]).map((s) => {
-    const v = 1 / rec.rates[s];
-    const hs = hist[s] || (hist[s] = {});
-    if (!hs[today]) { hs[today] = v; Object.keys(hs).sort().slice(0, -3).forEach((k) => delete hs[k]); }
-    const prevDay = Object.keys(hs).sort().filter((k) => k < today).pop();
-    const diff = prevDay ? v - hs[prevDay] : 0;
-    return h('div', { class: 'kv' }, h('span', { class: 'kv-k', text: s }),
-      h('span', { class: 'kv-v', text: v.toLocaleString(undefined, { maximumFractionDigits: v < 1 ? 4 : 2, minimumFractionDigits: 2 }) + ' ' + (CUR_SYM[base] || base) }),
-      h('span', { class: 'kv-d ' + (diff > 0 ? 'up' : diff < 0 ? 'down' : ''), text: diff ? (diff > 0 ? '▲' : '▼') : '' }));
-  });
+  let prev = null;
+  if (cur.date) {
+    const pd = shiftDate(cur.date, back);
+    const pk = base + '@' + pd;
+    prev = days[pk] || null;
+    if (!prev) {
+      const r = await fxDay(base, pd);
+      if (r) {
+        prev = days[pk] = r.rates;
+        const keys = Object.keys(days);
+        if (keys.length > 24) keys.slice(0, keys.length - 24).forEach((k) => delete days[k]);
+      }
+    }
+  }
   cache.save();
-  el.replaceChildren(...(rows.length ? rows : [h('div', { class: 'w-msg', text: '—' })]));
+  const sym = CUR_SYM[base] || base;
+  const digits = (v) => (v < 0.1 ? 5 : v < 1 ? 4 : v < 100 ? 3 : 2);
+  const fmt = (v, d = digits(v)) => v.toLocaleString(locale(), { maximumFractionDigits: d, minimumFractionDigits: Math.min(2, d) });
+  const wasLabel = t('was' + back);
+  const rows = (g.symbols || []).filter((s) => s !== base && cur.rates[s]).map((s) => {
+    const v = 1 / cur.rates[s];
+    const p = prev && prev[s] ? 1 / prev[s] : null;
+    const diff = p ? v - p : 0;
+    const pct = p ? (diff / p) * 100 : 0;
+    const dir = !p || Math.abs(pct) < 0.005 ? '' : diff > 0 ? 'up' : 'down';
+    const sign = diff > 0 ? '+' : diff < 0 ? '−' : '';
+    const row = h('div', { class: 'kv fx' },
+      h('span', { class: 'kv-k', text: s }),
+      h('span', { class: 'fx-v' },
+        h('span', { class: 'kv-v', text: fmt(v) + ' ' + sym }),
+        p ? h('small', { text: `${wasLabel}: ${fmt(p)}` }) : null),
+      p ? h('span', { class: 'fx-d kv-d ' + dir },
+        h('b', { text: (dir === 'up' ? '▲ ' : dir === 'down' ? '▼ ' : '') + sign + fmt(Math.abs(diff), Math.max(2, digits(v))) }),
+        h('small', { text: sign + Math.abs(pct).toLocaleString(locale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%' })) : h('span'));
+    row.title = p ? `1 ${s} = ${fmt(v, 6)} ${base}\n${shiftDate(cur.date, back)}: ${fmt(p, 6)} ${base}` : `1 ${s} = ${fmt(v, 6)} ${base}`;
+    return row;
+  });
+  const out = rows.length ? rows : [h('button', { class: 'w-msg link', text: t('symbols'), onclick: () => openGroupDialog({ group: g }) })];
+  if (rows.length && cur.date) {
+    out.push(h('div', { class: 'fx-foot', text: t('fxDate', new Date(cur.date + 'T12:00').toLocaleDateString(locale(), { day: 'numeric', month: 'long' })) }));
+  }
+  el.replaceChildren(...out);
 }
 const COIN_IDS = { BTC: 'bitcoin', ETH: 'ethereum', SOL: 'solana', DOGE: 'dogecoin', XRP: 'ripple', ADA: 'cardano', TON: 'the-open-network', BNB: 'binancecoin',
   LTC: 'litecoin', TRX: 'tron', AVAX: 'avalanche-2', LINK: 'chainlink', DOT: 'polkadot', USDT: 'tether', USDC: 'usd-coin', XMR: 'monero', ATOM: 'cosmos', NEAR: 'near', SUI: 'sui' };
@@ -625,7 +774,8 @@ async function wCountdown(g, el) {
       h('small', { text: e.left === 0 ? t('today') : e.d.toLocaleDateString(locale(), { day: 'numeric', month: 'long', year: e.d.getFullYear() !== today.getFullYear() ? 'numeric' : undefined }) + (e.left < 0 ? ' · ' + t('passed') : '') })))));
 }
 // доступ к чужим сайтам — только по запросу и только к нужному
-function originOf(url) { const u = R.parseUrl(url); return u ? u.origin + '/*' : null; }
+// без порта: Firefox не принимает порт в шаблоне доступа, а Chrome без порта и так пускает на любой
+function originOf(url) { const u = R.parseUrl(url); return u && /^https?:$/.test(u.protocol) ? `${u.protocol}//${u.hostname}/*` : null; }
 async function hasOrigin(url) {
   const o = originOf(url);
   try { return !!(o && ext && ext.permissions && await ext.permissions.contains({ origins: [o] })); } catch { return false; }
@@ -633,7 +783,7 @@ async function hasOrigin(url) {
 function askOrigin(url) { const o = originOf(url); return o && ext && ext.permissions ? ext.permissions.request({ origins: [o] }).catch(() => false) : Promise.resolve(false); }
 function grantBtn(url, g, el, fn) {
   return h('div', { class: 'grant' }, h('span', { class: 'w-msg', text: t('needAccess', (R.parseUrl(url) || {}).hostname || url) }),
-    h('button', { class: 'btn ghost sm', text: t('grant'), onclick: async () => { if (await askOrigin(url)) fn(g, el); } }));
+    h('button', { class: 'btn ghost sm', text: t('grant'), onclick: async () => { if (await askOrigin(url)) { await allowFraming(url); fn(g, el); } } }));
 }
 async function wRss(g, el) {
   if (!g.feed) { el.replaceChildren(h('button', { class: 'w-msg link', text: t('feed'), onclick: () => openGroupDialog({ group: g }) })); return; }
@@ -659,10 +809,63 @@ async function wRss(g, el) {
     return a;
   }));
 }
+// Grafana, Uptime Kuma и многие панели шлют X-Frame-Options / CSP frame-ancestors — браузер показывает «отклонено».
+// С доступом к сайту расширение снимает эти заголовки, но только для фреймов внутри своей же страницы.
+const dnr = () => (ext && ext.declarativeNetRequest && ext.declarativeNetRequest.updateDynamicRules ? ext.declarativeNetRequest : null);
+async function frameRules() { try { return (await dnr().getDynamicRules()) || []; } catch { return []; } }
+async function allowFraming(url) {
+  const u = R.parseUrl(url);
+  if (!dnr() || !u) return false;
+  const host = u.hostname.toLowerCase();
+  const rules = await frameRules();
+  const old = rules.find((r) => (r.condition.requestDomains || []).includes(host));
+  if (old && (old.condition.resourceTypes || []).includes('xmlhttprequest')) return true;
+  const id = rules.reduce((m, r) => Math.max(m, r.id), 0) + 1;
+  try {
+    await dnr().updateDynamicRules({ removeRuleIds: old ? [old.id] : [], addRules: [{ id, priority: 1,
+      action: { type: 'modifyHeaders',
+        responseHeaders: [{ header: 'x-frame-options', operation: 'remove' }, { header: 'content-security-policy', operation: 'remove' }],
+        requestHeaders: [{ header: 'origin', operation: 'remove' }] },
+      condition: { requestDomains: [host], resourceTypes: ['sub_frame', 'xmlhttprequest'], initiatorDomains: [location.hostname] } }] });
+    return true;
+  } catch (e) { console.warn('dnr', e); return false; }
+}
+// правила для сайтов, которых больше нет во встроенных страницах, убираем
+async function syncFrameRules() {
+  if (!dnr()) return;
+  const hosts = new Set(state.groups.filter((g) => ['iframe', 'server'].includes(g.kind) && g.url).map((g) => (R.parseUrl(g.url) || {}).hostname).filter(Boolean));
+  const stale = (await frameRules()).filter((r) => !(r.condition.requestDomains || []).some((d) => hosts.has(d))).map((r) => r.id);
+  if (stale.length) dnr().updateDynamicRules({ removeRuleIds: stale }).catch(() => {});
+}
+// YouTube и пр. целиком в рамке не живут — у них есть специальные адреса для встраивания
+function embedUrl(url) {
+  const u = R.parseUrl(url);
+  if (!u) return url;
+  const host = u.hostname.replace(/^(www|m)\./, '');
+  let id = '';
+  if (host === 'youtu.be') id = u.pathname.slice(1);
+  else if (/(^|\.)youtube\.com$/.test(host)) id = u.searchParams.get('v') || (/^\/(shorts|live)\/([\w-]+)/.exec(u.pathname) || [])[2] || '';
+  if (id) return `https://www.youtube-nocookie.com/embed/${id}`;
+  if (/(^|\.)youtube\.com$/.test(host) && u.searchParams.get('list')) return `https://www.youtube-nocookie.com/embed/videoseries?list=${u.searchParams.get('list')}`;
+  if (host === 'vimeo.com' && /^\/\d+/.test(u.pathname)) return `https://player.vimeo.com/video${u.pathname}`;
+  return url;
+}
 async function wIframe(g, el) {
   if (!g.url) { el.replaceChildren(h('button', { class: 'w-msg link', text: t('pageUrl'), onclick: () => openGroupDialog({ group: g }) })); return; }
-  const fr = h('iframe', { class: 'frame', src: g.url, loading: 'lazy', referrerPolicy: 'no-referrer', style: { height: clamp(+g.height || 320, 120, 1200) + 'px' } });
-  el.replaceChildren(fr, h('a', { class: 'frame-open', href: g.url, target: '_blank', rel: 'noopener', html: svg('ext') }));
+  const src = embedUrl(g.url);
+  const canAsk = !!(ext && ext.permissions && originOf(src));
+  const allowed = canAsk && src === g.url ? await hasOrigin(src) : true;
+  if (allowed && canAsk && src === g.url) await allowFraming(src); // Chrome; в Firefox заголовки снимает фоновый скрипт
+  const fr = h('iframe', { class: 'frame', src, loading: 'lazy', allow: 'fullscreen; picture-in-picture; encrypted-media', allowFullscreen: true,
+    referrerPolicy: 'strict-origin-when-cross-origin', style: { height: clamp(+g.height || 320, 120, 1200) + 'px' } });
+  const out = [fr, h('a', { class: 'frame-open', href: g.url, target: '_blank', rel: 'noopener', title: t('openNew'), html: svg('ext') })];
+  if (!allowed) {
+    out.push(h('div', { class: 'frame-hint' }, h('span', { text: t('frameHint') }),
+      h('button', { class: 'btn ghost sm', text: t('frameAllow'), onclick: async () => {
+        if (await askOrigin(src)) { await allowFraming(src); wIframe(g, el); }
+      } })));
+  }
+  el.replaceChildren(...out);
 }
 async function wGithub(g, el) {
   const repos = (g.repos || []).map((r) => r.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\/+$/, '')).filter((r) => /^[\w.-]+\/[\w.-]+$/.test(r));
@@ -718,11 +921,167 @@ async function wTopsites(g, el) {
   el.replaceChildren(box);
 }
 
+// ---------- виджет «Сервер»: Glances, Netdata, Proxmox ----------
+// Токен Proxmox — только на этом устройстве: не синхронизируются и не попадают в экспорт.
+const SECRETS = 'rdb2_secrets';
+let secrets = {};
+async function loadSecrets() {
+  try {
+    secrets = ext && ext.storage && ext.storage.local ? ((await ext.storage.local.get(SECRETS)) || {})[SECRETS] || {} : JSON.parse(localStorage.getItem(SECRETS) || '{}');
+  } catch { secrets = {}; }
+}
+function saveSecrets() {
+  try {
+    if (ext && ext.storage && ext.storage.local) ext.storage.local.set({ [SECRETS]: secrets });
+    else localStorage.setItem(SECRETS, JSON.stringify(secrets));
+  } catch {}
+}
+const secretOf = (g) => secrets[g.id] || {};
+
+// автообновление живых виджетов, пока вкладка на экране
+const live = new Map();
+function scheduleLive(g, el, fn, sec) {
+  clearTimeout(live.get(g.id));
+  live.set(g.id, setTimeout(() => {
+    live.delete(g.id);
+    if (!el.isConnected) return;
+    if (document.hidden) { scheduleLive(g, el, fn, sec); return; }
+    fn(g, el).catch((e) => widgetErr(g, el, e, fn));
+  }, sec * 1000));
+}
+function clearLive() { live.forEach((x) => clearTimeout(x)); live.clear(); }
+
+const fmtBytes = (n) => {
+  if (!(n >= 0)) return '—';
+  const u = R.lang() === 'ru' ? ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ', 'ПБ'] : ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return n.toLocaleString(locale(), { maximumFractionDigits: n < 10 && i ? 1 : 0 }) + ' ' + u[i];
+};
+function fmtUptime(sec) {
+  sec = +sec || 0;
+  const d = Math.floor(sec / 86400), hh = Math.floor((sec % 86400) / 3600), mm = Math.floor((sec % 3600) / 60);
+  const ru = R.lang() === 'ru';
+  return d ? `${d} ${ru ? 'дн.' : 'd'} ${hh} ${ru ? 'ч' : 'h'}` : hh ? `${hh} ${ru ? 'ч' : 'h'} ${mm} ${ru ? 'мин' : 'm'}` : `${mm} ${ru ? 'мин' : 'm'}`;
+}
+function bar(label, pct, note) {
+  pct = clamp(+pct || 0, 0, 100);
+  return h('div', { class: 'bar-row' },
+    h('span', { class: 'bar-l', text: label }),
+    h('span', { class: 'bar' }, h('i', { class: pct >= 90 ? 'hot' : pct >= 75 ? 'warm' : '', style: { width: pct + '%' } })),
+    h('span', { class: 'bar-v', text: Math.round(pct) + '%' }),
+    note ? h('small', { class: 'bar-n', text: note }) : null);
+}
+const wFoot = (...kids) => h('div', { class: 'w-foot' }, ...kids);
+
+async function api(g, path, opts = {}) {
+  const base = g.url.replace(/\/+$/, '');
+  let r;
+  try {
+    r = await fetch(base + path, { credentials: 'include', cache: 'no-store', signal: AbortSignal.timeout(10000), ...opts });
+  } catch (e) { throw Object.assign(new Error('net'), { code: 'net' }); }
+  if (r.status === 401 || r.status === 403) throw Object.assign(new Error('auth'), { code: 'auth', status: r.status });
+  if (!r.ok) throw Object.assign(new Error('http ' + r.status), { code: 'http', status: r.status });
+  const txt = await r.text();
+  try { return JSON.parse(txt); } catch { return txt; }
+}
+async function widgetErr(g, el, e, fn) {
+  const host = (R.parseUrl(g.url) || {}).host || g.url;
+  const ver = ext && ext.runtime && ext.runtime.getManifest ? 'R.Db ' + ext.runtime.getManifest().version : '';
+  const btns = [];
+  let msg = t('err');
+  if (e && e.code === 'net') {
+    // разбираемся, кто виноват: no-cors-запрос не требует доступа — если он прошёл, сервер жив, а не пускает браузер
+    const alive = await fetch(g.url + '/', { mode: 'no-cors', cache: 'no-store', signal: AbortSignal.timeout(6000) }).then(() => true, () => false);
+    if (alive) {
+      msg = t('svcNoAccess', host);
+      btns.push(h('button', { class: 'btn primary sm', text: t('grant'), onclick: async () => {
+        if (await askOrigin(g.url)) { await allowFraming(g.url); el.replaceChildren(h('span', { class: 'spinner' })); fn && fn(g, el); }
+      } }));
+    } else {
+      msg = t('svcNet', host) + ' ' + t('svcNetWhy') + (/^https:/.test(g.url) ? ' ' + t('svcCert') : R.isFirefox ? ' ' + t('svcHttpsOnly') : '');
+    }
+  } else if (e && e.code === 'auth') msg = t('svcAuth');
+  else if (e && e.code === 'http') msg = t('svcHttp', e.status);
+  if (fn) btns.push(h('button', { class: 'btn ghost sm', text: t('retry'), onclick: () => { el.replaceChildren(h('span', { class: 'spinner' })); fn(g, el); } }));
+  btns.push(h('a', { class: 'btn ghost sm', href: g.url, target: '_blank', rel: 'noopener', text: t('openNew') }),
+    h('button', { class: 'btn ghost sm', text: t('edit'), onclick: () => openGroupDialog({ group: g }) }));
+  if (!el.isConnected) return;
+  el.replaceChildren(h('div', { class: 'w-err' }, h('span', { text: msg }), h('span', { class: 'btns' }, ...btns), ver ? h('small', { class: 'w-ver', text: ver }) : null));
+  if (fn) scheduleLive(g, el, fn, 60);
+}
+// общая обвязка: адрес задан? доступ к сайту есть? ошибки — понятным текстом
+function svcWidget(fn, every) {
+  const run = async (g, el) => {
+    if (!g.url) { el.replaceChildren(h('button', { class: 'w-msg link', text: t('svcSetup'), onclick: () => openGroupDialog({ group: g }) })); return; }
+    if (ext && ext.permissions && !await hasOrigin(g.url)) { el.replaceChildren(grantBtn(g.url, g, el, run)); return; }
+    await allowFraming(g.url); // правило без Origin для этого хоста (уже есть — ничего не делает)
+    try {
+      await fn(g, el);
+      scheduleLive(g, el, run, every);
+    } catch (e) { console.warn(g.kind, e); widgetErr(g, el, e, run); }
+  };
+  return run;
+}
+
+// --- сервер: Glances, Netdata, Proxmox ---
+const wServer = svcWidget(async (g, el) => {
+  const src = g.source || 'glances';
+  if (src === 'glances') {
+    let v = 4;
+    let ql = await api(g, '/api/4/quicklook').catch((e) => { if (e.code === 'http') { v = 3; return null; } throw e; });
+    if (!ql) ql = await api(g, '/api/3/quicklook');
+    const [mem, fs, up] = await Promise.all([api(g, `/api/${v}/mem`).catch(() => null), api(g, `/api/${v}/fs`).catch(() => []), api(g, `/api/${v}/uptime`).catch(() => '')]);
+    const rows = [bar('CPU', ql.cpu), bar('RAM', mem ? mem.percent : ql.mem, mem ? `${fmtBytes(mem.used)} / ${fmtBytes(mem.total)}` : '')];
+    (Array.isArray(fs) ? fs : []).filter((d) => d.size > 2 ** 30 && !/^\/(boot|snap|run|dev|sys|proc)|^\/var\/lib\/docker/.test(d.mnt_point || '')).slice(0, 3)
+      .forEach((d) => rows.push(bar(d.mnt_point === '/' ? (R.lang() === 'ru' ? 'Диск' : 'Disk') : d.mnt_point, d.percent, `${fmtBytes(d.free ?? d.size - d.used)} ${t('free')}`)));
+    if (ql.swap) rows.push(bar('Swap', ql.swap));
+    el.replaceChildren(...rows, wFoot(ql.cpu_name ? h('span', { text: ql.cpu_name }) : null, up ? h('span', { text: '⏱ ' + String(up).replace(/"/g, '') }) : null));
+  } else if (src === 'netdata') {
+    const last = async (chart) => {
+      const d = await api(g, `/api/v1/data?chart=${encodeURIComponent(chart)}&after=-2&points=1&group=average&format=json&options=abs`);
+      const row = d.data[0] || [];
+      const o = {};
+      d.labels.forEach((l, i) => { if (i) o[l] = +row[i] || 0; });
+      return o;
+    };
+    const [cpu, ram, disk, up] = await Promise.all([last('system.cpu'), last('system.ram'), last('disk_space._').catch(() => null), last('system.uptime').catch(() => null)]);
+    const cpuPct = Object.values(cpu).reduce((a, b) => a + b, 0);
+    const ramTotal = Object.values(ram).reduce((a, b) => a + b, 0);
+    const rows = [bar('CPU', cpuPct), bar('RAM', ramTotal ? (ram.used / ramTotal) * 100 : 0, `${fmtBytes(ram.used * 2 ** 20)} / ${fmtBytes(ramTotal * 2 ** 20)}`)];
+    if (disk) {
+      const tot = (disk.avail || 0) + (disk.used || 0) + (disk['reserved for root'] || 0);
+      rows.push(bar(R.lang() === 'ru' ? 'Диск' : 'Disk', tot ? (disk.used / tot) * 100 : 0, `${fmtBytes(disk.avail * 2 ** 30)} ${t('free')}`));
+    }
+    el.replaceChildren(...rows, up ? wFoot(h('span', { text: '⏱ ' + fmtUptime(up.uptime) })) : '');
+  } else {
+    const tok = secretOf(g).token;
+    if (!tok) throw Object.assign(new Error('auth'), { code: 'auth' });
+    const hdr = { headers: { Authorization: 'PVEAPIToken=' + tok.replace(/^PVEAPIToken=/, '') } };
+    const [nodes, vms] = await Promise.all([api(g, '/api2/json/nodes', hdr), api(g, '/api2/json/cluster/resources?type=vm', hdr).catch(() => null)]);
+    const out = [];
+    (nodes.data || []).sort((a, b) => a.node.localeCompare(b.node)).forEach((n) => {
+      out.push(h('div', { class: 'node-h' }, h('span', { class: 'ping', 'data-s': n.status === 'online' ? 'up' : 'down' }), h('b', { text: n.node }),
+        n.uptime ? h('small', { text: '⏱ ' + fmtUptime(n.uptime) }) : null));
+      if (n.status === 'online') {
+        out.push(bar('CPU', n.cpu * 100, n.maxcpu ? n.maxcpu + ' CPU' : ''), bar('RAM', (n.mem / n.maxmem) * 100, `${fmtBytes(n.mem)} / ${fmtBytes(n.maxmem)}`),
+          bar(R.lang() === 'ru' ? 'Диск' : 'Disk', (n.disk / n.maxdisk) * 100, `${fmtBytes(n.maxdisk - n.disk)} ${t('free')}`));
+      }
+    });
+    if (vms && vms.data) {
+      const all = vms.data.filter((x) => !x.template);
+      const run = all.filter((x) => x.status === 'running').length;
+      out.push(wFoot(h('span', { text: t('vmRun', run, all.length) })));
+    }
+    el.replaceChildren(...out);
+  }
+}, 15);
+
 // ---------- перетаскивание ----------
 let drag = null;
 let dropMark = null;
 function clearDrop() {
-  document.querySelectorAll('.drop-before,.drop-after,.drop-into,.drop-left,.drop-right').forEach((x) => x.classList.remove('drop-before', 'drop-after', 'drop-into', 'drop-left', 'drop-right'));
+  document.querySelectorAll('.drop-before,.drop-after,.drop-into').forEach((x) => x.classList.remove('drop-before', 'drop-after', 'drop-into'));
   dropMark = null;
 }
 function externalUrl(dt) {
@@ -733,16 +1092,6 @@ function externalUrl(dt) {
 function onDragOver(e, g, card) {
   const types = Array.from(e.dataTransfer.types || []);
   if (!drag && !types.includes('text/uri-list') && !types.includes('text/plain')) return;
-  if (drag && drag.type === 'group') {
-    if (drag.id === g.id) return;
-    e.preventDefault();
-    const r = card.getBoundingClientRect();
-    const before = cols > 1 ? e.clientX < r.left + r.width / 2 : e.clientY < r.top + r.height / 2;
-    clearDrop();
-    card.classList.add(before ? 'drop-left' : 'drop-right');
-    dropMark = { type: 'group', before };
-    return;
-  }
   if (g.kind !== 'links' || state.settings.lock) return;
   e.preventDefault();
   e.dataTransfer.dropEffect = drag ? 'move' : 'copy';
@@ -764,15 +1113,6 @@ function onDrop(e, g, card) {
   e.preventDefault();
   const mark = dropMark;
   clearDrop();
-  if (mark.type === 'group' && drag) {
-    const from = state.groups.findIndex((x) => x.id === drag.id);
-    const moving = state.groups.splice(from, 1)[0];
-    let to = state.groups.indexOf(g);
-    if (!mark.before) to++;
-    state.groups.splice(to, 0, moving);
-    save();
-    return;
-  }
   let before = null;
   if (mark.target) {
     const idx = g.items.findIndex((x) => x.id === mark.target);
@@ -799,6 +1139,338 @@ document.addEventListener('drop', (e) => {
   const res = quickAdd(url);
   if (res) toast(t('added', res.g.title), t('edit'), () => openLinkDialog({ link: res.l }));
 });
+
+// ---------- перетаскивание групп: мышью, соседи раздвигаются на лету ----------
+// HTML5 drag тут неудобен: в Firefox не тянется с кнопки-заголовка, а место видно только при броске
+let gdrag = null;
+function startGroupDrag(e, card) {
+  if (state.settings.lock || e.button !== 0 || gdrag) return;
+  if (e.target.closest('.card-tools')) return;
+  const sx = e.clientX, sy = e.clientY;
+  const move = (ev) => {
+    if (!gdrag) {
+      if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 6) return;
+      beginGroupDrag(card, sx, sy);
+    }
+    ev.preventDefault();
+    gdrag.x = ev.clientX; gdrag.y = ev.clientY;
+    gdrag.ghost.style.left = (gdrag.x - gdrag.dx) + 'px';
+    gdrag.ghost.style.top = (gdrag.y - gdrag.dy) + 'px';
+    hoverGroup();
+  };
+  const key = (ev) => { if (ev.key === 'Escape' && gdrag) { ev.preventDefault(); stop(true); } };
+  const stop = (cancel) => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
+    window.removeEventListener('keydown', key, true);
+    if (gdrag) endGroupDrag(cancel === true);
+  };
+  const up = () => stop(false);
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
+  window.addEventListener('keydown', key, true);
+}
+function beginGroupDrag(card, sx, sy) {
+  closeMenu();
+  const r = card.getBoundingClientRect();
+  const ghost = card.cloneNode(true);
+  // копия без живых iframe и без data-атрибутов, по которым ищутся виджеты
+  ghost.querySelectorAll('iframe').forEach((f) => f.replaceWith(h('div', { class: 'frame', style: { height: f.style.height } })));
+  ghost.querySelectorAll('[data-wid],[data-gid]').forEach((x) => { x.removeAttribute('data-wid'); x.removeAttribute('data-gid'); });
+  ghost.removeAttribute('data-gid');
+  ghost.className = 'drag-ghost';
+  Object.assign(ghost.style, { width: r.width + 'px', left: r.left + 'px', top: r.top + 'px', gridColumn: '', gridRowEnd: '' });
+  document.body.append(ghost);
+  card.classList.add('placeholder');
+  document.body.classList.add('g-dragging');
+  gdrag = { card, ghost, dx: sx - r.left, dy: sy - r.top, x: sx, y: sy, last: null, lock: 0, raf: 0,
+    origNext: card.nextSibling };
+  autoScroll();
+}
+function hoverGroup() {
+  const d = gdrag;
+  if (!d || performance.now() < d.lock) return;
+  const grid = $('#grid');
+  const el = document.elementFromPoint(d.x, d.y);
+  // над вкладкой другого стола — группа уедет туда
+  const tab = el && el.closest('.board-tab[data-bid]');
+  document.querySelectorAll('.board-tab.drop-into').forEach((x) => { if (x !== tab) x.classList.remove('drop-into'); });
+  d.tab = tab && tab.dataset.bid !== curBoard() ? tab.dataset.bid : null;
+  if (d.tab) { tab.classList.add('drop-into'); return; }
+  const over = el && el.closest('#grid > .card');
+  if (over === d.card) { d.last = null; return; }
+  if (over) {
+    if (over === d.last) return; // ждём, пока курсор уйдёт с карточки, которую только что подвинули
+    const kids = Array.from(grid.children);
+    const from = kids.indexOf(d.card), to = kids.indexOf(over);
+    flip(() => grid.insertBefore(d.card, from < to ? over.nextSibling : over));
+    d.last = over;
+    return;
+  }
+  // ниже всех карточек — в самый конец
+  const rest = Array.from(grid.children).filter((c) => c !== d.card);
+  const gr = grid.getBoundingClientRect();
+  if (rest.length && d.x >= gr.left && d.x <= gr.right && d.y > Math.max(...rest.map((c) => c.getBoundingClientRect().bottom))
+    && grid.lastElementChild !== d.card) {
+    flip(() => grid.append(d.card));
+    d.last = null;
+  }
+}
+// FLIP: запомнили, где были карточки, переставили, плавно доехали
+function flip(mutate) {
+  const cards = Array.from($('#grid').children);
+  const before = new Map(cards.map((c) => [c, c.getBoundingClientRect()]));
+  mutate();
+  const moved = [];
+  cards.forEach((c) => {
+    const a = before.get(c), b = c.getBoundingClientRect();
+    const dx = a.left - b.left, dy = a.top - b.top;
+    if (!dx && !dy) return;
+    c.style.transition = 'none';
+    c.style.transform = `translate(${dx}px, ${dy}px)`;
+    moved.push(c);
+  });
+  void document.body.offsetWidth;
+  moved.forEach((c) => {
+    c.style.transition = 'transform .2s cubic-bezier(.2,.7,.3,1)';
+    c.style.transform = '';
+    setTimeout(() => { c.style.transition = ''; }, 220);
+  });
+  if (gdrag) gdrag.lock = performance.now() + 160;
+}
+function autoScroll() {
+  const d = gdrag;
+  if (!d) return;
+  const edge = 80;
+  const v = d.y < edge ? -(edge - d.y) / 3 : d.y > window.innerHeight - edge ? (d.y - (window.innerHeight - edge)) / 3 : 0;
+  if (v) { window.scrollBy(0, v); hoverGroup(); }
+  d.raf = requestAnimationFrame(autoScroll);
+}
+function endGroupDrag(cancel) {
+  const d = gdrag;
+  gdrag = null;
+  cancelAnimationFrame(d.raf);
+  const grid = $('#grid');
+  if (cancel) flip(() => grid.insertBefore(d.card, d.origNext && d.origNext.parentNode === grid ? d.origNext : null));
+  const r = d.card.getBoundingClientRect();
+  d.ghost.classList.add('landing');
+  Object.assign(d.ghost.style, { left: r.left + 'px', top: r.top + 'px' });
+  setTimeout(() => { d.ghost.remove(); d.card.classList.remove('placeholder'); }, 180);
+  document.body.classList.remove('g-dragging');
+  // клик после перетаскивания не должен сворачивать группу
+  const eat = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+  window.addEventListener('click', eat, { capture: true, once: true });
+  setTimeout(() => window.removeEventListener('click', eat, { capture: true }), 0);
+  document.querySelectorAll('.board-tab.drop-into').forEach((x) => x.classList.remove('drop-into'));
+  const g = findGroup(d.card.dataset.gid);
+  if (!cancel && d.tab && g) { // бросили на вкладку другого стола
+    if (d.origNext && d.origNext.parentNode === grid) grid.insertBefore(d.card, d.origNext);
+    moveGroupToBoard(g, d.tab);
+    return;
+  }
+  const order = Array.from(grid.children).map((c) => c.dataset.gid);
+  const vis = visibleGroups();
+  if (order.length === vis.length && order.some((id, i) => vis[i].id !== id)) {
+    const pos = vis.map((x) => state.groups.indexOf(x));
+    const sorted = order.map(findGroup); // сначала собрать, потом раскладывать — иначе затрём ещё не переставленные
+    pos.forEach((p, i) => { state.groups[p] = sorted[i]; });
+    save(false); // DOM уже в нужном порядке — не перерисовываем, чтобы виджеты не перезагружались
+  }
+}
+// ширина группы: тянем за правый край
+function startResize(e, g, card) {
+  if (state.settings.lock || e.button !== 0) return;
+  e.preventDefault(); e.stopPropagation();
+  const grid = $('#grid');
+  const colW = (grid.getBoundingClientRect().width + GAP) / cols;
+  const left = card.getBoundingClientRect().left;
+  const startSpan = g.span >= 4 ? cols : Math.min(g.span || 1, cols);
+  let span = startSpan;
+  card.classList.add('resizing');
+  document.body.classList.add('g-resizing');
+  const badge = h('span', { class: 'resize-badge' });
+  card.firstElementChild.append(badge);
+  const paint = () => { badge.textContent = span >= cols ? t('wFull') : `${span} / ${cols}`; };
+  paint();
+  const move = (ev) => {
+    const n = clamp(Math.round((ev.clientX - left + GAP) / colW), 1, cols);
+    if (n === span) return;
+    flip(() => { span = n; card.style.gridColumn = `span ${n}`; });
+    paint();
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
+    card.classList.remove('resizing');
+    document.body.classList.remove('g-resizing');
+    badge.remove();
+    if (span === startSpan) return;
+    // до упора вправо = «во всю ширину», чтобы на широком экране группа тоже растягивалась
+    g.span = span >= cols ? 4 : Math.min(span, 3);
+    save(false);
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
+}
+
+// ---------- рабочие столы (вкладки над сеткой) ----------
+// какой стол открыт — своё на каждом устройстве, сами столы синхронизируются
+let board = null;
+function curBoard() {
+  if (!board || !state.boards.some((b) => b.id === board)) {
+    let saved = null;
+    try { saved = localStorage.getItem('rdb2_board'); } catch {}
+    board = state.boards.some((b) => b.id === saved) ? saved : state.boards[0].id;
+  }
+  return board;
+}
+const onBoard = (g) => g.board === curBoard();
+function visibleGroups() { return state.groups.filter(onBoard); }
+function boardName(b) { return b.title || t('board') + ' ' + (state.boards.indexOf(b) + 1); }
+function setBoard(id) {
+  if (id === curBoard()) return;
+  board = id;
+  try { localStorage.setItem('rdb2_board', id); } catch {}
+  window.scrollTo(0, 0);
+  render();
+}
+function stepBoard(d) {
+  const i = state.boards.findIndex((b) => b.id === curBoard());
+  const n = state.boards[(i + d + state.boards.length) % state.boards.length];
+  if (n) setBoard(n.id);
+}
+function renderBoards() {
+  const nav = $('#boards');
+  if (state.boards.length < 2) { nav.hidden = true; nav.replaceChildren(); return; }
+  nav.hidden = false;
+  nav.replaceChildren(...state.boards.map((b, i) => {
+    const n = visibleCount(b.id);
+    const tab = h('button', { class: 'board-tab' + (b.id === curBoard() ? ' on' : ''), 'data-bid': b.id, title: boardName(b) + (i < 9 ? ` (${i + 1})` : '') },
+      h('span', { text: boardName(b) }), n ? h('small', { text: n }) : null);
+    tab.addEventListener('click', () => setBoard(b.id));
+    tab.addEventListener('dblclick', () => { if (!state.settings.lock) openBoardDialog({ b }); });
+    tab.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); openMenuAt(e.clientX, e.clientY, boardMenu(b)); });
+    return tab;
+  }), state.settings.lock ? '' : h('button', { class: 'board-tab add', title: t('addBoard'), html: svg('plus'), onclick: () => openBoardDialog({}) }));
+}
+function visibleCount(id) { return state.groups.filter((g) => g.board === id).length; }
+function boardMenu(b) {
+  const i = state.boards.indexOf(b);
+  const mv = (d) => { state.boards.splice(i, 1); state.boards.splice(i + d, 0, b); save(); };
+  return [
+    { icon: 'edit', label: t('rename'), run: () => openBoardDialog({ b }) },
+    i > 0 ? { icon: 'left', label: t('moveLeft'), run: () => mv(-1) } : null,
+    i < state.boards.length - 1 ? { icon: 'right', label: t('moveRight'), run: () => mv(1) } : null,
+    { icon: 'plus', label: t('addBoard'), run: () => openBoardDialog({}) },
+    state.boards.length > 1 ? { sep: true } : null,
+    state.boards.length > 1 ? { icon: 'trash', label: t('del'), danger: true, run: () => removeBoard(b) } : null,
+  ].filter(Boolean);
+}
+function openBoardDialog({ b }) {
+  const title = h('input', { type: 'text', maxLength: 30, value: b ? b.title : '', placeholder: b ? boardName(b) : t('boardPh') });
+  const parts = [field(t('title'), title)];
+  if (!b && state.boards.length === 1) parts.push(h('p', { class: 'muted', text: t('boardFirst') }));
+  openDialog(b ? boardName(b) : t('addBoard'), h('div', { class: 'stack' }, ...parts), {
+    onSave: () => {
+      if (b) { b.title = title.value.trim(); save(); return; }
+      // первый «второй» стол: у текущего тоже появляется имя, иначе вкладки «Стол 1 / Стол 2»
+      if (state.boards.length === 1 && !state.boards[0].title) state.boards[0].title = t('boardMain');
+      const nb = { id: uid(), title: title.value.trim() };
+      state.boards.push(nb);
+      board = nb.id;
+      try { localStorage.setItem('rdb2_board', nb.id); } catch {}
+      save();
+    },
+  });
+}
+function removeBoard(b) {
+  const bi = state.boards.indexOf(b);
+  if (bi < 0 || state.boards.length < 2) return;
+  const gone = state.groups.map((g, i) => [g, i]).filter(([g]) => g.board === b.id);
+  state.boards.splice(bi, 1);
+  state.groups = state.groups.filter((g) => g.board !== b.id);
+  if (board === b.id) board = null;
+  save();
+  toast(t('deleted') + ': ' + boardName(b), t('undo'), () => {
+    state.boards.splice(bi, 0, b);
+    gone.forEach(([g, i]) => state.groups.splice(Math.min(i, state.groups.length), 0, g));
+    save();
+  });
+}
+function moveGroupToBoard(g, bid) {
+  state.groups.splice(state.groups.indexOf(g), 1);
+  g.board = bid;
+  state.groups.push(g);
+  save();
+  toast(t('movedTo', boardName(state.boards.find((b) => b.id === bid))), t('open'), () => setBoard(bid));
+}
+
+// ---------- клавиатура: пробел — буквы на ссылках, набери и перейди ----------
+const HINT_KEYS = 'asdfghjklqwertyuiopzxcvbnm';
+let hints = null;
+function hintLabels(n) {
+  if (n <= HINT_KEYS.length) return HINT_KEYS.slice(0, n).split('');
+  const out = [];
+  for (const a of HINT_KEYS) for (const b of HINT_KEYS) { out.push(a + b); if (out.length >= n) return out; }
+  return out;
+}
+function startHints() {
+  const links = Array.from(document.querySelectorAll('#grid .lnk, #grid .feed, #grid .rel')).filter((a) => {
+    const r = a.getBoundingClientRect();
+    return r.width && r.bottom > 0 && r.top < window.innerHeight; // только то, что видно на экране
+  });
+  if (!links.length && state.boards.length < 2) return;
+  const labels = hintLabels(links.length);
+  hints = { typed: '', items: links.map((a, i) => {
+    const tag = h('span', { class: 'hint', text: labels[i] });
+    a.append(tag);
+    return { a, key: labels[i], tag };
+  }) };
+  document.body.classList.add('hinting');
+}
+function stopHints() {
+  if (!hints) return;
+  hints.items.forEach((x) => x.tag.remove());
+  hints = null;
+  document.body.classList.remove('hinting');
+}
+function hintKey(e) {
+  if (e.key === 'Escape' || e.key === ' ') { stopHints(); return; }
+  if (e.key === 'Backspace') { hints.typed = hints.typed.slice(0, -1); }
+  else if (/^[1-9]$/.test(e.key) && !hints.typed) { const b = state.boards[+e.key - 1]; stopHints(); if (b) setBoard(b.id); return; }
+  else if (e.key.length === 1 && HINT_KEYS.includes(e.key.toLowerCase())) hints.typed += e.key.toLowerCase();
+  else if (!['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) { stopHints(); return; }
+  else return;
+  const hit = hints.items.find((x) => x.key === hints.typed);
+  if (hit) {
+    const newTab = e.shiftKey || e.ctrlKey || e.metaKey || hit.a.target === '_blank';
+    const href = hit.a.href;
+    stopHints();
+    if (newTab) window.open(href, '_blank', 'noopener'); else location.href = href;
+    return;
+  }
+  let any = false;
+  hints.items.forEach((x) => {
+    const ok = x.key.startsWith(hints.typed);
+    any = any || ok;
+    x.tag.hidden = !ok;
+    x.tag.innerHTML = ok ? `<b>${hints.typed}</b>${x.key.slice(hints.typed.length)}` : '';
+  });
+  if (!any) stopHints();
+}
+window.addEventListener('keydown', (e) => {
+  if (hints) { e.preventDefault(); e.stopPropagation(); hintKey(e); return; }
+  if (dlg.open || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target.closest && e.target.closest('input,textarea,select,[contenteditable],.todo-txt')) return;
+  if (e.key === ' ' && !e.repeat) { e.preventDefault(); e.stopPropagation(); closeMenu(); startHints(); }
+  else if (e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && state.boards.length > 1) { e.preventDefault(); stepBoard(e.key === 'ArrowLeft' ? -1 : 1); }
+}, true);
+document.addEventListener('mousedown', stopHints);
+window.addEventListener('scroll', () => { if (hints) stopHints(); }, { passive: true });
 
 // ---------- меню ----------
 function openMenu(anchor, items) { const r = anchor.getBoundingClientRect(); openMenuAt(r.right, r.bottom + 4, items, true); }
@@ -866,6 +1538,7 @@ function addItems() {
   return [
     { icon: 'link', label: t('addLink'), run: () => openLinkDialog({}) },
     { icon: 'group', label: t('addGroup'), run: () => openGroupDialog({ kind: 'links' }) },
+    { icon: 'tiles', label: t('addBoard'), run: () => openBoardDialog({}) },
     { icon: 'widget', label: t('addWidget'), sub: R.WIDGETS.map((k) => ({ icon: kindIcon(k), label: kName(k), run: () => openGroupDialog({ kind: k }) })) },
     { sep: true },
     { icon: 'gear', label: t('settings'), run: openSettings },
@@ -983,14 +1656,17 @@ function openLinkDialog({ link, groupId, url: preUrl }) {
   title.addEventListener('input', () => { titleTouched = true; paintPreview(); });
   desc.addEventListener('input', () => { descTouched = true; paintPreview(); });
 
+  const pingSel = select([['auto', t('pingAuto')], ['on', t('pingOn')], ['off', t('pingNever')]], link?.ping === true ? 'on' : link?.ping === false ? 'off' : 'auto');
   const body = h('div', { class: 'stack' }, preview, field(t('url'), url), h('div', { class: 'row2' }, field(t('title'), title), field(t('group'), gsel)),
-    field(t('desc'), desc), status, h('div', { class: 'field' }, h('span', { class: 'field-l', text: t('icon') }), iconTabs));
+    h('div', { class: 'row2' }, field(t('desc'), desc), field(t('pingLink'), pingSel)), status,
+    h('div', { class: 'field' }, h('span', { class: 'field-l', text: t('icon') }), iconTabs));
   openDialog(editing ? t('editLink') : t('newLink'), body, {
     extraBtn: editing ? h('button', { type: 'button', class: 'btn ghost danger', html: svg('trash'), title: t('del'), onclick: () => { dlg.close(); removeLink(link.id); } }) : null,
     onSave: () => {
       const u = R.normalizeUrl(url.value);
       if (!u) { url.focus(); return false; }
-      const vals = { url: u, title: title.value.trim() || R.titleFromUrl(u), desc: desc.value.trim(), icon: data.icon };
+      const vals = { url: u, title: title.value.trim() || R.titleFromUrl(u), desc: desc.value.trim(), icon: data.icon,
+        ping: pingSel.value === 'on' ? true : pingSel.value === 'off' ? false : undefined };
       let target = gsel.value === '__new' ? ensureLinkGroup() : findGroup(gsel.value);
       if (editing) {
         const f = findLink(link.id);
@@ -999,11 +1675,13 @@ function openLinkDialog({ link, groupId, url: preUrl }) {
         Object.assign(f.l, vals);
         if (!vals.desc) delete f.l.desc;
         if (!vals.icon) delete f.l.icon;
+        if (vals.ping === undefined) delete f.l.ping;
         if (target && target !== f.g) { f.g.items.splice(f.i, 1); target.items.push(f.l); }
       } else {
         const l = { id: uid(), ...vals };
         if (!l.desc) delete l.desc;
         if (!l.icon) delete l.icon;
+        if (l.ping === undefined) delete l.ping;
         (target || ensureLinkGroup()).items.push(l);
       }
       save();
@@ -1019,7 +1697,7 @@ function openGroupDialog({ group, kind }) {
   const title = h('input', { type: 'text', maxLength: 40, value: g.title || '', placeholder: kName(g.kind) });
   const span = seg([[1, '1'], [2, '2'], [3, '3'], [4, t('wFull')]], g.span || 1);
   const parts = [field(t('title'), title), field(t('width'), span)];
-  let view = null, city, days, hours, base, syms, coins, zones, events, feed, count, purl, height, repos;
+  let view = null, srv = null, city, days, hours, base, syms, cmp, coins, zones, events, feed, count, purl, height, repos;
   const rangeField = (label, min, max, step, val) => {
     const r = h('input', { type: 'range', min, max, step, value: val });
     const v = h('b', { text: r.value });
@@ -1042,7 +1720,8 @@ function openGroupDialog({ group, kind }) {
       const b = h('button', { type: 'button', class: 'chip' + ((g.symbols || []).includes(c) ? ' on' : ''), text: c, onclick: () => b.classList.toggle('on') });
       syms.append(b);
     });
-    parts.push(field(t('base'), base), field(t('symbols'), syms));
+    cmp = seg([[1, t('cmp1')], [7, t('cmp7')], [30, t('cmp30')]], g.cmp || 1);
+    parts.push(field(t('base'), base), field(t('symbols'), syms), field(t('cmp'), cmp));
   }
   if (g.kind === 'crypto') { coins = h('input', { type: 'text', value: (g.coins || []).join(', '), placeholder: 'BTC, ETH, SOL' }); parts.push(field(t('coins'), coins)); }
   if (g.kind === 'clock') {
@@ -1063,6 +1742,23 @@ function openGroupDialog({ group, kind }) {
     let hr; [height, hr] = rangeField(t('height'), 150, 900, 10, g.height || 320);
     parts.push(field(t('pageUrl'), purl), hr, h('p', { class: 'muted', text: t('noFrame') }));
   }
+  if (g.kind === 'server') {
+    const sec = secretOf(g);
+    const surl = h('input', { type: 'text', inputMode: 'url', value: g.url || '', required: true });
+    const key = h('input', { type: 'password', value: sec.token || '', autocomplete: 'off', spellcheck: false, placeholder: 'root@pam!rdb=xxxxxxxx-xxxx-…' });
+    const hint = h('p', { class: 'muted' });
+    const keyF = field(t('pveToken'), key);
+    const PH = { glances: 'http://192.168.1.10:61208', netdata: 'http://192.168.1.10:19999', proxmox: 'https://192.168.1.2:8006' };
+    const paint = () => {
+      const w = srv.type.value;
+      surl.placeholder = PH[w];
+      keyF.hidden = w !== 'proxmox';
+      hint.textContent = t('h_' + w) + (w === 'proxmox' ? ' ' + t('secretNote') : '');
+    };
+    srv = { surl, key, type: seg([['glances', 'Glances'], ['netdata', 'Netdata'], ['proxmox', 'Proxmox']], g.source || 'glances', () => paint()) };
+    parts.push(field(t('source'), srv.type), field(t('url'), surl), keyF, hint);
+    paint();
+  }
   if (g.kind === 'github') { repos = h('input', { type: 'text', value: (g.repos || []).join(', '), placeholder: 'immich-app/immich, jellyfin/jellyfin' }); parts.push(field(t('repos'), repos)); }
   if (g.kind === 'topsites') { let cr; [count, cr] = rangeField(t('count'), 4, 24, 1, g.count || 8); parts.push(cr); }
   openDialog(editing ? (g.title || kName(g.kind)) : kName(g.kind), h('div', { class: 'stack' }, ...parts), {
@@ -1073,7 +1769,7 @@ function openGroupDialog({ group, kind }) {
       tgt.span = +span.value || 1;
       if (view) tgt.view = view.value;
       if (city) { if (!city.value.trim()) { city.focus(); return false; } tgt.city = city.value.trim(); tgt.days = +days.value; tgt.hours = +hours.value; }
-      if (base) { tgt.base = base.value; tgt.symbols = Array.from(syms.querySelectorAll('.chip.on')).map((x) => x.textContent); }
+      if (base) { tgt.base = base.value; tgt.symbols = Array.from(syms.querySelectorAll('.chip.on')).map((x) => x.textContent); tgt.cmp = +cmp.value || 1; }
       if (coins) tgt.coins = coins.value.split(/[\s,;]+/).map((s) => s.trim().toUpperCase()).filter(Boolean);
       if (feed) {
         const u = R.normalizeUrl(feed.value);
@@ -1082,13 +1778,32 @@ function openGroupDialog({ group, kind }) {
         if (u !== tgt.feed && cache.c.rss) delete cache.c.rss[u];
         tgt.feed = u;
       }
-      if (purl) { const u = R.normalizeUrl(purl.value); if (!u) { purl.focus(); return false; } tgt.url = u; tgt.height = +height.value; }
+      if (purl) {
+        const u = R.normalizeUrl(purl.value);
+        if (!u) { purl.focus(); return false; }
+        // доступ спрашиваем сразу, пока есть жест пользователя — тогда встраивание заработает с первого раза
+        if (embedUrl(u) === u) askOrigin(u).then((ok) => ok && allowFraming(u)).then(() => render());
+        tgt.url = u; tgt.height = +height.value;
+      }
+      if (srv) {
+        const u = (R.normalizeUrl(srv.surl.value) || '').replace(/\/+$/, '');
+        if (!u) { srv.surl.focus(); return false; }
+        const w = srv.type.value;
+        tgt.url = u;
+        tgt.source = w;
+        if (!title.value.trim()) tgt.title = { glances: R.lang() === 'ru' ? 'Сервер' : 'Server', netdata: 'Netdata', proxmox: 'Proxmox' }[w];
+        const tok = w === 'proxmox' ? srv.key.value.trim() : '';
+        if (tok) secrets[tgt.id] = { token: tok }; else delete secrets[tgt.id];
+        saveSecrets();
+        // доступ спрашиваем, пока есть клик пользователя
+        askOrigin(u).then((ok) => ok && allowFraming(u)).then(() => render());
+      }
       if (count) tgt.count = +count.value;
       if (zones) tgt.zones = zones.value.split(',').map((z) => z.trim()).filter((z) => parseZone(z));
       if (events) tgt.events = events.value.split('\n').map((l) => /^\s*(\d{4}-\d{2}-\d{2})\s+(.+)$/.exec(l)).filter(Boolean).map((m) => ({ date: m[1], title: m[2].trim() }));
       if (repos) tgt.repos = repos.value.split(/[\s,;]+/).map((r) => r.trim()).filter(Boolean);
       if (g.kind === 'topsites' && ext && ext.permissions) ext.permissions.request({ permissions: ['topSites'] }).then((ok) => ok && render()).catch(() => {});
-      if (!editing) state.groups.push(tgt);
+      if (!editing) { tgt.board = curBoard(); state.groups.push(tgt); }
       save();
       if (!editing) requestAnimationFrame(() => $(`[data-gid="${tgt.id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
     },
@@ -1120,6 +1835,7 @@ function openSettings() {
   }));
   const look = h('section', { class: 'set' }, h('h3', { text: t('sLook') }),
     chk('showClock', t('sClock')), field(t('sName'), name), chk('showSearch', t('sSearch')), chk('showDesc', t('sDesc')),
+    field(t('sTheme'), seg([['dark', t('thDark')], ['light', t('thLight')], ['auto', t('thAuto')]], s.theme || 'dark', (v) => { s.theme = v; live(); showBgFilters(); })),
     field(t('sAccent'), accents),
     field(t('sDensity'), seg([['comfortable', t('dComfort')], ['compact', t('dCompact')]], s.density, (v) => { s.density = v; live(); })),
     field(t('sMaxw'), seg([['normal', t('mwNormal')], ['wide', t('mwWide')], ['full', t('mwFull')]], s.maxw, (v) => { s.maxw = v; live(); })),
@@ -1136,7 +1852,7 @@ function openSettings() {
     }
     if (b.mode === 'custom') {
       const ta = h('textarea', { rows: 3, value: (b.urls || []).join('\n'), placeholder: 'https://…' });
-      ta.addEventListener('change', () => { b.urls = ta.value.split('\n').map((x) => x.trim()).filter(Boolean); bgLocal.index = 0; save(false); showBg(); });
+      ta.addEventListener('change', () => { b.urls = ta.value.split('\n').map((x) => x.trim()).filter(Boolean); bgLocal.url = null; save(false); showBg(); });
       kids.push(field(t('bgUrls'), ta));
     }
     if (b.mode === 'upload') {
@@ -1171,6 +1887,16 @@ function openSettings() {
   lang.onchange = () => { s.lang = lang.value; R.setLang(s.lang); save(); applySettings(); tick(); openSettings(); };
   const beh = h('section', { class: 'set' }, h('h3', { text: t('sBehavior') }),
     h('div', { class: 'row2' }, field(t('sEngine'), eng), field(t('sLang'), lang)), engC,
+    field(t('sPing'), seg([['off', t('pingOff')], ['local', t('pingLocal')], ['all', t('pingAll')]], s.ping || 'local', (v) => { s.ping = v; save(); })),
+    field(t('sAlerts'), seg([['off', t('alOff')], ['badge', t('alBadge')], ['notify', t('alNotify')]], s.alerts || 'off', async (v) => {
+      // уведомления — необязательное разрешение, спрашиваем прямо по клику
+      if (v === 'notify' && ext && ext.permissions) {
+        const ok = await ext.permissions.request({ permissions: ['notifications'] }).catch(() => false);
+        if (!ok) { s.alerts = 'badge'; save(false); toast(t('alNoPerm')); openSettings(); return; }
+      }
+      s.alerts = v; save(false);
+    })),
+    h('p', { class: 'muted', text: t('alHint') }),
     chk('newTab', t('sNewTab')), chk('lock', t('sLock')), chk('sync', t('sSync')));
   // данные
   const file = h('input', { type: 'file', accept: 'application/json,.json', hidden: true });
@@ -1180,7 +1906,7 @@ function openSettings() {
       h('button', { type: 'button', class: 'btn ghost', text: t('exportJson'), onclick: exportJson }),
       h('button', { type: 'button', class: 'btn ghost', text: t('importJson'), onclick: () => file.click() }),
       h('button', { type: 'button', class: 'btn ghost', text: t('importBm'), onclick: importBookmarks }),
-      h('button', { type: 'button', class: 'btn ghost danger', text: t('reset'), onclick: () => { if (confirm(t('confirmReset'))) { state = R.defaultState(); save(); applySettings(); showBg(); openSettings(); } } }),
+      h('button', { type: 'button', class: 'btn ghost danger', text: t('reset'), onclick: () => { if (confirm(t('confirmReset'))) { state = R.sanitize(R.defaultState()); board = null; save(); applySettings(); showBg(); openSettings(); } } }),
       file));
   const ver = (ext && ext.runtime && ext.runtime.getManifest) ? ext.runtime.getManifest().version : '2';
   const about = h('section', { class: 'set' }, h('h3', { text: t('sAbout') }), h('p', { class: 'muted', text: `R.Db ${ver} — ${t('about')}` }),
@@ -1191,7 +1917,7 @@ function openSettings() {
 }
 function showBgFilters() {
   const b = state.settings.bg;
-  $('#dim').style.background = `rgba(6,8,12,${b.dim / 100})`;
+  $('#dim').style.background = `rgba(${themeNow() === 'light' ? '236,239,245' : '6,8,12'},${b.dim / 100})`;
   document.documentElement.style.setProperty('--bg-blur', b.blur + 'px');
 }
 function exportJson() {
@@ -1249,6 +1975,7 @@ async function importBookmarks() {
         (node.children || []).filter((c) => c.children).forEach((c) => take(c, links.length ? title : prefix));
       };
       take(pick, '');
+      groups.forEach((x) => { x.board = curBoard(); });
       state.groups.push(...groups.slice(0, 30));
       save();
       toast(t('imported', groups.reduce((a, g) => a + g.items.length, 0)));
@@ -1346,6 +2073,7 @@ async function mergeInbox() {
 }
 if (ext && ext.storage && ext.storage.onChanged) {
   ext.storage.onChanged.addListener((ch, areaName) => {
+    if (!state) return; // ещё грузимся
     if (areaName === 'local' && ch[store.keys.INBOX] && ch[store.keys.INBOX].newValue) mergeInbox();
     if (areaName === 'local' && ch[store.keys.KEY]) {
       const nv = ch[store.keys.KEY].newValue;
@@ -1365,6 +2093,10 @@ window.addEventListener('pagehide', () => store.flushSync());
 (async function boot() {
   const { state: s, migrated } = await store.load();
   state = s;
+  await loadSecrets();
+  // ключи удалённых групп (и виджетов, которых больше нет) не храним
+  const gone = Object.keys(secrets).filter((id) => !state.groups.some((g) => g.id === id));
+  if (gone.length) { gone.forEach((id) => delete secrets[id]); saveSecrets(); }
   applySettings();
   tick();
   setInterval(tick, 5000);
