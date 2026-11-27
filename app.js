@@ -286,11 +286,12 @@ window.addEventListener('resize', () => { const c = cols; computeCols(); if (c !
 function render() {
   const grid = $('#grid');
   ro.disconnect();
-  clearLive();
+  kept.clear();
   computeCols();
   renderBoards();
   const vis = visibleGroups();
   grid.replaceChildren(...vis.map(groupEl));
+  clearLive(kept);
   grid.querySelectorAll('.card').forEach((c) => { packCard(c); ro.observe(c.firstElementChild); });
   $('#emptyBoard').hidden = vis.length > 0;
   loadWidgets();
@@ -315,7 +316,7 @@ function groupEl(g) {
     if (g.kind === 'links') linksBody(g, body);
     else if (g.kind === 'note') noteBody(g, body);
     else if (g.kind === 'todo') todoBody(g, body);
-    else body.append(h('div', { class: 'w-load', 'data-wid': g.id }, h('span', { class: 'spinner' })));
+    else body.append(widgetEl(g));
   }
   inner.append(head, body);
   if (!state.settings.lock) {
@@ -470,6 +471,7 @@ function paintPings() {
 async function runPings() {
   if (pingRun) return pingRun;
   pingRun = (async () => {
+    await netReady();
     const urls = Array.from(new Set(Array.from(document.querySelectorAll('.lnk[data-purl]'), (a) => a.dataset.purl)));
     let i = 0;
     const worker = async () => {
@@ -479,7 +481,7 @@ async function runPings() {
         paintPings();
       }
     };
-    await Promise.all(Array.from({ length: Math.min(6, urls.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(4, urls.length) }, worker));
     // старые адреса не копим
     const keep = new Set(urls);
     Object.keys(pings).forEach((k) => { if (!keep.has(k) && Date.now() - pings[k].t > 864e5) delete pings[k]; });
@@ -530,24 +532,84 @@ function todoBody(g, body) {
   body.append(ul, inp);
 }
 
+// ---------- сеть: сначала страница, потом запросы ----------
+// Пока страница не отрисована, виджеты берут данные из кэша, а запросы ждут. Дальше — не больше NET_MAX одновременно,
+// у каждого таймаут, одинаковые запросы склеиваются: медленный API не забивает соединения браузера.
+const NET_MAX = 4, NET_TIMEOUT = 12000;
+let netOpen = false, netActive = 0;
+const netWait = [], netQueue = [], inflight = new Map();
+const netReady = () => (netOpen ? Promise.resolve() : new Promise((r) => netWait.push(r)));
+function openNet() {
+  if (netOpen) return;
+  netOpen = true;
+  netWait.splice(0).forEach((r) => r());
+  // виджеты, нарисованные из старого кэша, теперь обновляем; при ошибке оставляем то, что уже показано
+  document.querySelectorAll('.w-load[data-early]').forEach((el) => {
+    delete el.dataset.early;
+    const g = findGroup(el.dataset.wid), fn = g && WIDGETS[g.kind];
+    if (fn) fn(g, el).catch((e) => console.warn(g.kind, e));
+  });
+}
+function openNetSoon() {
+  // после первого кадра и когда браузер освободится, но не позже чем через ~1.5 с
+  const go = () => (window.requestIdleCallback ? requestIdleCallback(openNet, { timeout: 1200 }) : setTimeout(openNet, 300));
+  requestAnimationFrame(() => setTimeout(go, 0));
+}
+async function withSlot(fn) {
+  await netReady();
+  if (netActive < NET_MAX) netActive++;
+  else await new Promise((r) => netQueue.push(r)); // слот передаётся из finally как есть
+  try { return await fn(); } finally { const n = netQueue.shift(); if (n) n(); else netActive--; }
+}
+// GET с таймаутом: { ok, status, data }
+function netGet(url, as = 'json') {
+  const k = as + ' ' + url;
+  if (inflight.has(k)) return inflight.get(k);
+  const p = withSlot(async () => {
+    const r = await fetch(url, { signal: AbortSignal.timeout(NET_TIMEOUT) });
+    return { ok: r.ok, status: r.status, data: r.ok ? await (as === 'text' ? r.text() : r.json()) : null };
+  });
+  inflight.set(k, p);
+  p.then(() => inflight.delete(k), () => inflight.delete(k));
+  return p;
+}
+async function getJSON(url) {
+  const r = await netGet(url);
+  if (!r.ok) throw new Error('http ' + r.status);
+  return r.data;
+}
+
 // ---------- виджеты ----------
 const WMO = (c) => c === 0 ? '☀️' : c <= 2 ? '🌤️' : c === 3 ? '☁️' : c <= 48 ? '🌫️' : c <= 57 ? '🌦️' : c <= 67 ? '🌧️' : c <= 77 ? '🌨️' : c <= 82 ? '🌧️' : c <= 86 ? '🌨️' : '⛈️';
-const fresh = (rec, min) => rec && Date.now() - rec.t < min * 60e3;
+// до открытия сети любой кэш считается свежим: сначала показываем, что есть, потом обновляем
+const fresh = (rec, min) => rec && (!netOpen || Date.now() - rec.t < min * 60e3);
+const CACHED = new Set(['weather', 'currency', 'crypto', 'rss', 'github']);
+// виджет перерисовывается и снова ходит в сеть, только если поменялись его настройки, а не при любом сохранении
+const kept = new Set();
+function widgetKey(g) {
+  const { title, span, collapsed, board, ...cfg } = g;
+  return JSON.stringify([cfg, secrets[g.id] || null, R.lang(), lastDay, { ...state.settings, bg: 0 }]);
+}
+function widgetEl(g) {
+  const key = widgetKey(g);
+  const old = $(`#grid .w-load[data-wid="${g.id}"]`);
+  if (old && old.dataset.wkey === key) { kept.add(g.id); return old; }
+  return h('div', { class: 'w-load', 'data-wid': g.id, 'data-wkey': key }, h('span', { class: 'spinner' }));
+}
 function loadWidgets() {
   state.groups.forEach((g) => {
-    if (g.collapsed) return;
+    if (g.collapsed || kept.has(g.id)) return;
     const el = $(`.w-load[data-wid="${g.id}"]`);
-    if (!el) return;
-    const fn = { weather: wWeather, currency: wCurrency, crypto: wCrypto, clock: wClock, calendar: wCalendar, countdown: wCountdown,
-      rss: wRss, iframe: wIframe, github: wGithub, topsites: wTopsites, server: wServer }[g.kind];
-    if (fn) fn(g, el).catch((e) => { console.warn(e); el.replaceChildren(h('div', { class: 'w-msg', text: t('err') })); });
+    const fn = el && WIDGETS[g.kind];
+    if (!fn) return;
+    if (!netOpen && CACHED.has(g.kind)) el.dataset.early = '1';
+    fn(g, el).catch((e) => { console.warn(e); el.dataset.wkey = ''; el.replaceChildren(h('div', { class: 'w-msg', text: t('err') })); }); // с ошибкой — повторим при следующей отрисовке
   });
 }
 async function geocode(city) {
   const k = city.trim().toLowerCase();
   if (cache.c.geo[k]) return cache.c.geo[k];
-  const r = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=${R.lang()}&format=json`);
-  const j = await r.json();
+  const j = await getJSON(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=${R.lang()}&format=json`);
   if (!j.results || !j.results.length) throw new Error('city');
   const v = { lat: j.results[0].latitude, lon: j.results[0].longitude, name: j.results[0].name };
   cache.c.geo[k] = v; cache.save();
@@ -559,8 +621,8 @@ async function wWeather(g, el) {
   const ck = `${geo.lat},${geo.lon}`;
   let rec = cache.c.wx[ck];
   if (!fresh(rec, 30)) {
-    const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${geo.lat}&longitude=${geo.lon}&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,relative_humidity_2m&hourly=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=8`);
-    rec = { t: Date.now(), d: await r.json() };
+    const wx = await getJSON(`https://api.open-meteo.com/v1/forecast?latitude=${geo.lat}&longitude=${geo.lon}&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,relative_humidity_2m&hourly=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=8`);
+    rec = { t: Date.now(), d: wx };
     cache.c.wx[ck] = rec; cache.save();
   }
   const d = rec.d, cur = d.current;
@@ -604,10 +666,10 @@ async function fxDay(base, date) {
   for (const u of [`https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@${date}/v1/currencies/${b}.json`,
     `https://${date}.currency-api.pages.dev/v1/currencies/${b}.json`]) {
     try {
-      const r = await fetch(u);
+      const r = await netGet(u);
       if (!r.ok) continue;
-      const j = await r.json();
-      if (!j[b]) continue;
+      const j = r.data;
+      if (!j || !j[b]) continue;
       const rates = {};
       CURRENCIES.forEach((c) => { const v = j[b][c.toLowerCase()]; if (v) rates[c] = v; }); // храним только нужное — кэш маленький
       return { date: j.date, rates };
@@ -627,7 +689,7 @@ async function wCurrency(g, el) {
     if (r) cur = fx[base] = { t: Date.now(), ...r };
     else if (!cur) {
       // запасной вариант — старый источник, только текущий курс без истории
-      const j = await (await fetch(`https://open.er-api.com/v6/latest/${base}`)).json();
+      const j = await getJSON(`https://open.er-api.com/v6/latest/${base}`);
       if (j.result !== 'success') throw new Error('fx');
       cur = { t: Date.now() - 170 * 60e3, date: '', rates: j.rates };
     }
@@ -683,8 +745,7 @@ async function wCrypto(g, el) {
   const key = ids.join(',');
   let rec = cache.c.cr[key];
   if (!fresh(rec, 10)) {
-    const r = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(key)}&vs_currencies=usd&include_24hr_change=true`);
-    rec = { t: Date.now(), d: await r.json() };
+    rec = { t: Date.now(), d: await getJSON(`https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(key)}&vs_currencies=usd&include_24hr_change=true`) };
     cache.c.cr[key] = rec; cache.save();
   }
   el.replaceChildren(...coins.map((c, i) => {
@@ -790,7 +851,9 @@ async function wRss(g, el) {
   let rec = cache.c.rss && cache.c.rss[g.feed];
   if (!fresh(rec, 30)) {
     if (!await hasOrigin(g.feed)) { el.replaceChildren(grantBtn(g.feed, g, el, wRss)); return; }
-    const txt = await (await fetch(g.feed)).text();
+    const fr = await netGet(g.feed, 'text');
+    if (!fr.ok) throw new Error('http ' + fr.status);
+    const txt = fr.data;
     const doc = new DOMParser().parseFromString(txt, 'text/xml');
     const nodes = Array.from(doc.querySelectorAll('item, entry')).slice(0, 30);
     const pick = (n, sel) => { const x = n.querySelector(sel); return x ? x.textContent.trim() : ''; };
@@ -852,6 +915,8 @@ function embedUrl(url) {
 }
 async function wIframe(g, el) {
   if (!g.url) { el.replaceChildren(h('button', { class: 'w-msg link', text: t('pageUrl'), onclick: () => openGroupDialog({ group: g }) })); return; }
+  await netReady(); // фреймы грузим после страницы
+  if (!el.isConnected) return;
   const src = embedUrl(g.url);
   const canAsk = !!(ext && ext.permissions && originOf(src));
   const allowed = canAsk && src === g.url ? await hasOrigin(src) : true;
@@ -876,11 +941,11 @@ async function wGithub(g, el) {
     let rec = cache.c.gh[r];
     if (!fresh(rec, 360)) {
       try {
-        let res = await fetch(`https://api.github.com/repos/${r}/releases/latest`);
-        if (res.ok) { const j = await res.json(); rec = { t: Date.now(), tag: j.tag_name, at: Date.parse(j.published_at), url: j.html_url }; }
+        let res = await netGet(`https://api.github.com/repos/${r}/releases/latest`);
+        if (res.ok) { const j = res.data; rec = { t: Date.now(), tag: j.tag_name, at: Date.parse(j.published_at), url: j.html_url }; }
         else if (res.status === 404) {
-          res = await fetch(`https://api.github.com/repos/${r}/tags?per_page=1`);
-          const j = res.ok ? await res.json() : [];
+          res = await netGet(`https://api.github.com/repos/${r}/tags?per_page=1`);
+          const j = res.ok ? res.data : [];
           rec = { t: Date.now(), tag: j[0] ? j[0].name : '—', at: 0, url: `https://github.com/${r}/tags` };
         } else rec = rec || null;
         if (rec) cache.c.gh[r] = rec;
@@ -945,11 +1010,12 @@ function scheduleLive(g, el, fn, sec) {
   live.set(g.id, setTimeout(() => {
     live.delete(g.id);
     if (!el.isConnected) return;
-    if (document.hidden) { scheduleLive(g, el, fn, sec); return; }
-    fn(g, el).catch((e) => widgetErr(g, el, e, fn));
+    const cur = findGroup(g.id) || g; // после синхронизации объект группы мог смениться
+    if (document.hidden) { scheduleLive(cur, el, fn, sec); return; }
+    fn(cur, el).catch((e) => widgetErr(cur, el, e, fn));
   }, sec * 1000));
 }
-function clearLive() { live.forEach((x) => clearTimeout(x)); live.clear(); }
+function clearLive(keep) { live.forEach((x, id) => { if (!keep || !keep.has(id)) { clearTimeout(x); live.delete(id); } }); }
 
 const fmtBytes = (n) => {
   if (!(n >= 0)) return '—';
@@ -978,11 +1044,14 @@ async function api(g, path, opts = {}) {
   const base = g.url.replace(/\/+$/, '');
   let r;
   try {
-    r = await fetch(base + path, { credentials: 'include', cache: 'no-store', signal: AbortSignal.timeout(10000), ...opts });
+    r = await withSlot(async () => {
+      const res = await fetch(base + path, { credentials: 'include', cache: 'no-store', signal: AbortSignal.timeout(10000), ...opts });
+      return { status: res.status, ok: res.ok, txt: res.ok ? await res.text() : '' };
+    });
   } catch (e) { throw Object.assign(new Error('net'), { code: 'net' }); }
   if (r.status === 401 || r.status === 403) throw Object.assign(new Error('auth'), { code: 'auth', status: r.status });
   if (!r.ok) throw Object.assign(new Error('http ' + r.status), { code: 'http', status: r.status });
-  const txt = await r.text();
+  const txt = r.txt;
   try { return JSON.parse(txt); } catch { return txt; }
 }
 async function widgetErr(g, el, e, fn) {
@@ -2089,6 +2158,9 @@ window.addEventListener('focus', () => { if (state) mergeInbox(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) store.flushSync(); });
 window.addEventListener('pagehide', () => store.flushSync());
 
+const WIDGETS = { weather: wWeather, currency: wCurrency, crypto: wCrypto, clock: wClock, calendar: wCalendar, countdown: wCountdown,
+  rss: wRss, iframe: wIframe, github: wGithub, topsites: wTopsites, server: wServer };
+
 // ---------- старт ----------
 (async function boot() {
   const { state: s, migrated } = await store.load();
@@ -2102,6 +2174,7 @@ window.addEventListener('pagehide', () => store.flushSync());
   setInterval(tick, 5000);
   await showBg();
   render();
+  openNetSoon();
   initSearch();
   $('#addBtn').addEventListener('click', (e) => openMenu(e.currentTarget, addItems()));
   $('#settingsBtn').addEventListener('click', openSettings);
